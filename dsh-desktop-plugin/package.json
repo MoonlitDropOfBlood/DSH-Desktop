@@ -1,0 +1,17 @@
+{
+  "name": "dsh-desktop-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop wrapper window controls, embedded into the DSH web UI as a client plugin.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.npm-cache/
+.electron-cache/
+.test-home/
+.fresh-home/
+*.log
+*.tgz

@@ -1,0 +1,64 @@
+{
+  "name": "dsh-desktop",
+  "productName": "DeepSeek Harness Desktop",
+  "version": "0.1.0",
+  "description": "Desktop wrapper for DeepSeek Harness: embeds the DSH web UI with window controls, tray, and update management. DSH core is NOT bundled — it is installed via npm on the target machine.",
+  "main": "main.js",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-tray-icon.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:portable": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "ai.deepseek.dsh.desktop",
+    "productName": "DeepSeek Harness Desktop",
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "dsh-desktop-plugin/**",
+      "build/tray-icon.png"
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon-512.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "icon": "build/icon-512.png"
+    }
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.4.2",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}

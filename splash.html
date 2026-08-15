@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+<title>DeepSeek Harness Desktop</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: #0b1120;
+    color: #e5e9f2;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  /* custom title bar (frameless window) */
+  #titlebar {
+    height: 38px;
+    display: flex; align-items: center; padding-left: 12px;
+    background: #0b1120; border-bottom: 1px solid #1d2840;
+    -webkit-app-region: drag; user-select: none;
+  }
+  #titlebar .drag { flex: 1; height: 100%; -webkit-app-region: drag; }
+  #titlebar .title { color: #7f8aa0; font-size: 12px; margin-right: 8px; }
+  #titlebar .btn {
+    -webkit-app-region: no-drag; width: 46px; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    color: #9aa5b8; font-size: 13px; cursor: pointer; transition: background 0.12s;
+  }
+  #titlebar .btn:hover { background: #1d2840; color: #e5e9f2; }
+  #titlebar .close:hover { background: #e81123; color: #fff; }
+  .body {
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+  }
+  .box { max-width: 640px; width: 90%; }
+  .spinner {
+    width: 44px; height: 44px; margin: 0 auto 22px;
+    border: 4px solid rgba(94, 140, 255, 0.25);
+    border-top-color: #5e8cff;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
+  #status { font-size: 13px; color: #9aa5b8; white-space: pre-line; line-height: 1.6; margin-bottom: 16px; }
+  .error { color: #ff6b6b !important; }
+  #log {
+    max-height: 180px;
+    overflow-y: auto;
+    text-align: left;
+    font-size: 11px;
+    font-family: Consolas, "Courier New", monospace;
+    color: #7f8aa0;
+    background: #0e1526;
+    border: 1px solid #1d2840;
+    border-radius: 6px;
+    padding: 10px 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    display: none;
+  }
+  #log.has-content { display: block; }
+</style>
+</head>
+<body>
+  <div id="titlebar">
+    <div class="drag"></div>
+    <div class="title">DeepSeek Harness</div>
+    <div class="btn" data-act="minimize" title="最小化">&#x2013;</div>
+    <div class="btn" data-act="toggleMaximize" title="最大化/还原">&#x25A1;</div>
+    <div class="btn close" data-act="close" title="关闭">&#x2715;</div>
+  </div>
+  <div class="body">
+    <div class="box">
+      <div class="spinner"></div>
+      <h1>DeepSeek Harness</h1>
+      <div id="status">正在启动…</div>
+      <pre id="log"></pre>
+    </div>
+  </div>
+  <script>
+    const statusEl = document.getElementById("status");
+    const logEl = document.getElementById("log");
+    document.querySelectorAll("#titlebar .btn").forEach((btn) => {
+      btn.addEventListener("click", () => window.dshDesktop.windowControl(btn.dataset.act));
+    });
+    window.dshDesktop.onStatus((message) => {
+      statusEl.textContent = message;
+      statusEl.classList.toggle("error", /失败|错误|无法|超时/.test(message));
+    });
+    window.dshDesktop.onLog((line) => {
+      const lines = (logEl.textContent + "\n" + line).trim().split("\n").slice(-8);
+      logEl.textContent = lines.join("\n");
+      logEl.classList.add("has-content");
+      logEl.scrollTop = logEl.scrollHeight;
+    });
+  </script>
+</body>
+</html>

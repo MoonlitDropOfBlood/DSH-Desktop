@@ -1,0 +1,8 @@
+# Desktop-app patch layer: mounts the dsh-desktop-plugin client package so the
+# DSH web UI renders frameless-window controls. Passed via `dsh web --patch`.
+# `insert` appends a NEW row. The package is resolved as a standard npm package
+# name from the profile's node_modules (see resolveBundleDir / client-modules).
+
+- insert:
+  - id: dsh-desktop-plugin
+    name: 'dsh-desktop-plugin'
