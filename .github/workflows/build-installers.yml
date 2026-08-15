@@ -57,17 +57,13 @@ jobs:
 
   build-mac:
     name: macOS ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Intel Mac 上构建 x64；Apple Silicon 上构建 arm64。
-          # （dmg 只能在 macOS 上构建；各自 arch 的 dmg 分别产出）
-          - arch: x64
-            runner: macos-13
-          - arch: arm64
-            runner: macos-14
+        arch:
+          - x64
+          - arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -76,6 +72,8 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build + publish dmg (${{ matrix.arch }})
+        # GitHub 的 macos-14 runner 是 Apple Silicon；electron-builder 可在其上
+        # 交叉构建 x64 与 arm64 的 dmg（macos-13/Intel runner 已被 GitHub 弃用）。
         run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish always
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
