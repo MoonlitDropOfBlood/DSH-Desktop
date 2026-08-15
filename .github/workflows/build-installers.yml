@@ -1,11 +1,15 @@
 name: Build Installers
 
-# 手动触发（workflow_dispatch）或打 v* 标签时触发，构建 1.0.0 各平台安装包。
+# 手动触发（workflow_dispatch）或打 v* 标签时触发，构建并自动发布到 GitHub Releases。
+# 发布需要仓库 secret：GH_TOKEN（GitHub Personal Access Token，需 repo/contents:write 权限）。
 on:
   workflow_dispatch:
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -18,19 +22,18 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build NSIS (x64 + ia32)
-        # --publish never: 禁止 electron-builder 自动发布（CI 里无 GH_TOKEN 会报错），
-        # 产物改用 upload-artifact 上传。
-        run: npx electron-builder --win nsis --x64 --ia32 --publish never
+      - name: Build + publish NSIS (x64 + ia32)
+        run: npx electron-builder --win nsis --x64 --ia32 --publish always
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installers
           path: dist/*.exe
 
   build-linux:
-    name: Linux (AppImage + deb)
+    name: Linux (AppImage + deb + rpm)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,10 +42,11 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build AppImage + deb + rpm
-        run: npx electron-builder --linux --publish never
+      - name: Build + publish AppImage + deb + rpm
+        run: npx electron-builder --linux --publish always
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: linux-installers
@@ -71,10 +75,11 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build dmg (${{ matrix.arch }})
-        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish never
+      - name: Build + publish dmg (${{ matrix.arch }})
+        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish always
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: mac-${{ matrix.arch }}-dmg
