@@ -1,7 +1,8 @@
 name: Build Installers
 
-# 手动触发（workflow_dispatch）或打 v* 标签时触发，构建并自动发布到 GitHub Releases。
-# 发布需要仓库 secret：GH_TOKEN（GitHub Personal Access Token，需 repo/contents:write 权限）。
+# 手动触发（workflow_dispatch）只构建 + 上传 artifact；
+# 打 v* 标签时（如 v1.0.0）额外把所有平台产物发布为一个正式 GitHub Release。
+# 发布需要仓库 secret：GH_TOKEN（GitHub Personal Access Token，需 contents:write 权限）。
 on:
   workflow_dispatch:
   push:
@@ -22,11 +23,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build + publish NSIS (x64 + ia32)
-        run: npx electron-builder --win nsis --x64 --ia32 --publish always
+      - name: Build NSIS (x64 + ia32)
+        run: npx electron-builder --win nsis --x64 --ia32 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installers
@@ -42,11 +42,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build + publish AppImage + deb + rpm
-        run: npx electron-builder --linux --publish always
+      - name: Build AppImage + deb + rpm
+        run: npx electron-builder --linux --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: linux-installers
@@ -71,14 +70,37 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build + publish dmg (${{ matrix.arch }})
+      - name: Build dmg (${{ matrix.arch }})
         # GitHub 的 macos-14 runner 是 Apple Silicon；electron-builder 可在其上
         # 交叉构建 x64 与 arm64 的 dmg（macos-13/Intel runner 已被 GitHub 弃用）。
-        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish always
+        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: mac-${{ matrix.arch }}-dmg
           path: dist/*.dmg
+
+  # 单独发布：把所有平台产物合成一个正式 Release（只对 v* 标签触发，避免生成 draft）。
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows, build-linux, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -la artifacts/
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
