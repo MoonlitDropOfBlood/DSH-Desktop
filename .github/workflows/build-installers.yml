@@ -37,20 +37,17 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build AppImage + deb
+      - name: Build AppImage + deb + rpm
         run: npx electron-builder --linux
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-installers
-          path: dist/*.AppImage
-          if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-deb
-          path: dist/*.deb
-          if-no-files-found: ignore
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
 
   build-mac:
     name: macOS ${{ matrix.arch }}
