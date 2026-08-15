@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness Desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Desktop wrapper for DeepSeek Harness: embeds the DSH web UI with window controls, tray, and update management. DSH core is NOT bundled — it is installed via npm on the target machine.",
   "main": "main.js",
   "private": true,
@@ -14,8 +14,9 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win nsis",
-    "dist:mac": "electron-builder --mac dmg",
-    "dist:linux": "electron-builder --linux AppImage",
+    "dist:win:x86": "electron-builder --win nsis --x86",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
     "dist:portable": "electron-builder --win portable"
   },
   "build": {
@@ -34,7 +35,13 @@
     },
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        }
       ],
       "icon": "build/icon.png"
     },
@@ -46,14 +53,36 @@
     },
     "mac": {
       "category": "public.app-category.developer-tools",
-      "icon": "build/icon-512.png"
+      "icon": "build/icon-512.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
     },
     "linux": {
       "target": [
-        "AppImage"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Development",
-      "icon": "build/icon-512.png"
+      "icon": "build/icon-512.png",
+      "synopsis": "DeepSeek Harness desktop wrapper",
+      "maintainer": "duke <wwhbygx@sina.com>"
     }
   },
   "devDependencies": {
