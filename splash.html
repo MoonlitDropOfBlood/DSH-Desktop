@@ -2,11 +2,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'" />
 <title>DeepSeek Harness Desktop</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
+  /* author CSS must not defeat the `hidden` attribute (e.g. .port-row flex) */
+  [hidden] { display: none !important; }
   html, body {
     height: 100%;
     margin: 0;
@@ -14,7 +16,7 @@
     color: #e5e9f2;
     font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   }
-  /* custom title bar (frameless window) */
+  /* custom title bar (frameless window) — controls work even if DSH fails */
   #titlebar {
     height: 38px;
     display: flex; align-items: center; padding-left: 12px;
@@ -27,6 +29,7 @@
     -webkit-app-region: no-drag; width: 46px; height: 100%;
     display: flex; align-items: center; justify-content: center;
     color: #9aa5b8; font-size: 13px; cursor: pointer; transition: background 0.12s;
+    border: none; background: transparent;
   }
   #titlebar .btn:hover { background: #1d2840; color: #e5e9f2; }
   #titlebar .close:hover { background: #e81123; color: #fff; }
@@ -34,7 +37,7 @@
     display: flex; align-items: center; justify-content: center;
     text-align: center; padding: 24px;
   }
-  .box { max-width: 640px; width: 90%; }
+  .box { max-width: 660px; width: 90%; }
   .spinner {
     width: 44px; height: 44px; margin: 0 auto 22px;
     border: 4px solid rgba(94, 140, 255, 0.25);
@@ -42,6 +45,7 @@
     border-radius: 50%;
     animation: spin 0.9s linear infinite;
   }
+  .spinner.hidden { display: none; }
   @keyframes spin { to { transform: rotate(360deg); } }
   h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
   #status { font-size: 13px; color: #9aa5b8; white-space: pre-line; line-height: 1.6; margin-bottom: 16px; }
@@ -61,42 +65,213 @@
     white-space: pre-wrap;
     word-break: break-all;
     display: none;
+    margin-top: 12px;
   }
   #log.has-content { display: block; }
+
+  /* determinate install progress */
+  .progress-wrap { margin: 0 auto 14px; max-width: 520px; }
+  .progress {
+    height: 8px; border-radius: 4px; overflow: hidden;
+    background: #16203a; border: 1px solid #1d2840;
+  }
+  .progress .bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #3b6cff, #5e8cff);
+    transition: width 0.3s ease;
+    border-radius: 4px;
+  }
+  .progress-text { margin-top: 8px; font-size: 12px; color: #7f8aa0; }
+
+  /* startup / crash error panel */
+  #errorPanel {
+    display: none;
+    margin-top: 4px;
+    text-align: left;
+    background: #120d18;
+    border: 1px solid #3a2434;
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  #errorPanel.visible { display: block; }
+  .error-icon {
+    font-size: 22px; line-height: 1;
+    color: #ff6b6b; margin-bottom: 10px;
+  }
+  #errorTitle { font-size: 15px; font-weight: 600; color: #ff8f8f; margin-bottom: 6px; }
+  #errorDetail {
+    font-size: 12px; color: #a8b3c8; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 160px; overflow-y: auto;
+    margin-bottom: 14px;
+  }
+  .port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .port-row label { font-size: 13px; color: #9aa5b8; }
+  .port-row input {
+    width: 110px; padding: 6px 10px;
+    background: #0e1526; color: #e5e9f2;
+    border: 1px solid #2a3a5f; border-radius: 6px;
+    font-size: 13px;
+  }
+  .port-row .hint { font-size: 11px; color: #7f8aa0; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .actions .act {
+    padding: 8px 18px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; border: 1px solid #2a3a5f;
+    background: #16203a; color: #dbe4f5;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .actions .act:hover { background: #1d2b4d; }
+  .actions .act.primary { background: #3b6cff; border-color: #3b6cff; color: #fff; }
+  .actions .act.primary:hover { background: #2f5ae0; }
+  .actions .act.danger { background: #3a1b1b; border-color: #5c2a2a; color: #ff9c9c; }
+  .actions .act.danger:hover { background: #4a2222; }
+  .copy {
+    margin-top: 12px; padding: 6px 14px; border-radius: 7px; cursor: pointer;
+    font-size: 12px; border: 1px solid #2a3a5f;
+    background: transparent; color: #7f8aa0; transition: color 0.12s, border-color 0.12s;
+  }
+  .copy:hover { color: #dbe4f5; border-color: #3b6cff; }
 </style>
 </head>
 <body>
   <div id="titlebar">
     <div class="drag"></div>
     <div class="title">DeepSeek Harness</div>
-    <div class="btn" data-act="minimize" title="最小化">&#x2013;</div>
-    <div class="btn" data-act="toggleMaximize" title="最大化/还原">&#x25A1;</div>
-    <div class="btn close" data-act="close" title="关闭">&#x2715;</div>
+    <button class="btn" data-act="minimize" title="最小化">&#x2013;</button>
+    <button class="btn" data-act="toggleMaximize" title="最大化/还原">&#x25A1;</button>
+    <button class="btn close" data-act="close" title="关闭">&#x2715;</button>
   </div>
   <div class="body">
     <div class="box">
-      <div class="spinner"></div>
+      <div class="spinner" id="spinner"></div>
       <h1>DeepSeek Harness</h1>
       <div id="status">正在启动…</div>
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress"><div class="bar" id="progressBar"></div></div>
+        <div class="progress-text" id="progressText"></div>
+      </div>
       <pre id="log"></pre>
+
+      <div id="errorPanel">
+        <div class="error-icon">&#x26A0;</div>
+        <div id="errorTitle"></div>
+        <div id="errorDetail"></div>
+        <div class="port-row" id="portRow" hidden>
+          <label for="portInput">端口</label>
+          <input id="portInput" type="number" min="1" max="65535" value="3080" />
+          <span class="hint">换一个未被占用的端口后重试</span>
+        </div>
+        <div class="actions" id="errorActions"></div>
+        <button class="copy" id="btnCopy" hidden>复制错误信息</button>
+      </div>
     </div>
   </div>
   <script>
-    const statusEl = document.getElementById("status");
-    const logEl = document.getElementById("log");
-    document.querySelectorAll("#titlebar .btn").forEach((btn) => {
-      btn.addEventListener("click", () => window.dshDesktop.windowControl(btn.dataset.act));
-    });
-    window.dshDesktop.onStatus((message) => {
-      statusEl.textContent = message;
-      statusEl.classList.toggle("error", /失败|错误|无法|超时/.test(message));
-    });
-    window.dshDesktop.onLog((line) => {
-      const lines = (logEl.textContent + "\n" + line).trim().split("\n").slice(-8);
-      logEl.textContent = lines.join("\n");
-      logEl.classList.add("has-content");
-      logEl.scrollTop = logEl.scrollHeight;
-    });
+    (function () {
+      var bridge = window.dshDesktop;
+      if (!bridge) return; // not inside the desktop wrapper
+
+      var statusEl = document.getElementById("status");
+      var logEl = document.getElementById("log");
+      var spinnerEl = document.getElementById("spinner");
+      var progressWrap = document.getElementById("progressWrap");
+      var progressBar = document.getElementById("progressBar");
+      var progressText = document.getElementById("progressText");
+      var errorPanel = document.getElementById("errorPanel");
+      var errorTitle = document.getElementById("errorTitle");
+      var errorDetail = document.getElementById("errorDetail");
+      var portRow = document.getElementById("portRow");
+      var portInput = document.getElementById("portInput");
+
+      function setErrorClass(flag) {
+        statusEl.classList.toggle("error", flag);
+      }
+
+      // titlebar window controls
+      document.querySelectorAll("#titlebar .btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          bridge.windowControl(btn.dataset.act);
+        });
+      });
+
+      bridge.onStatus(function (message) {
+        statusEl.textContent = message;
+        setErrorClass(/失败|错误|无法|超时|占用/.test(message));
+      });
+
+      bridge.onLog(function (line) {
+        var lines = (logEl.textContent + "\n" + line).trim().split("\n").slice(-30);
+        logEl.textContent = lines.join("\n");
+        logEl.classList.add("has-content");
+        logEl.scrollTop = logEl.scrollHeight;
+      });
+
+      // determinate download/install progress
+      bridge.onProgress(function (p) {
+        if (!p) return;
+        progressWrap.hidden = false;
+        var pct = Math.max(0, Math.min(100, Number(p.percent) || 0));
+        progressBar.style.width = pct + "%";
+        if (p.phase === "done") {
+          progressText.textContent = "下载完成，正在安装依赖并启动…";
+        } else {
+          var mb = (Number(p.downloadedMB) || 0).toFixed(1);
+          var total = (Number(p.totalMB) || 0).toFixed(0);
+          progressText.textContent = "已下载 " + mb + " MB / 约 " + total + " MB（" + pct + "%）";
+        }
+      });
+
+      // startup / crash error panel — everything is in-page and copyable
+      var errorActions = document.getElementById("errorActions");
+      var btnCopy = document.getElementById("btnCopy");
+
+      bridge.onStartupError(function (info) {
+        if (!info) return;
+        errorTitle.textContent = info.message || "启动失败";
+        errorDetail.textContent = info.detail || "";
+        var hasChangePort = !!info.canChangePort;
+        portRow.hidden = !hasChangePort;
+        if (hasChangePort) portInput.value = String(info.suggestPort || 3080);
+        var actions = (Array.isArray(info.actions) && info.actions.length)
+          ? info.actions
+          : [{ id: "retry", label: "重试" }, { id: "quit", label: "退出" }];
+        errorActions.innerHTML = "";
+        actions.forEach(function (a) {
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "act";
+          if (a.id === "quit") btn.className += " danger";
+          else if (a.id === "retry" || a.id === "installRetry") btn.className += " primary";
+          btn.textContent = a.label || a.id;
+          btn.addEventListener("click", function () {
+            errorPanel.classList.remove("visible");
+            bridge.startupChoice({ action: a.id, port: portInput.value });
+          });
+          errorActions.appendChild(btn);
+        });
+        btnCopy.hidden = false;
+        btnCopy.textContent = "复制错误信息";
+        errorPanel.classList.add("visible");
+        spinnerEl.classList.add("hidden");
+        statusEl.textContent = info.message || "启动失败";
+        setErrorClass(true);
+      });
+
+      // copy the full crash text (message + detail + live log) to the clipboard
+      btnCopy.addEventListener("click", function () {
+        var text = errorTitle.textContent + "\n\n" + errorDetail.textContent +
+          "\n\n--- 最近日志 ---\n" + logEl.textContent;
+        try {
+          if (bridge.copyText) bridge.copyText(text);
+          else if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
+          btnCopy.textContent = "已复制 ✓";
+          setTimeout(function () { btnCopy.textContent = "复制错误信息"; }, 1500);
+        } catch (err) {
+          btnCopy.textContent = "复制失败";
+        }
+      });
+    })();
   </script>
 </body>
 </html>

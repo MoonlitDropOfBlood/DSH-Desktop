@@ -14,7 +14,9 @@
  *   - approval/request (waterfall) : confirmation needed
  */
 
-const NOTIFY_URL = "http://127.0.0.1:34951/";
+const PORT = process.env.DSH_DESKTOP_NOTIFY_PORT || "34951";
+const TOKEN = process.env.DSH_DESKTOP_NOTIFY_TOKEN || "";
+const NOTIFY_URL = `http://127.0.0.1:${PORT}/`;
 
 const textEncoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
 
@@ -26,7 +28,12 @@ function post(kind, summary) {
     const body = textEncoder ? textEncoder.encode(payload) : payload;
     fetch(NOTIFY_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // Per-launch bearer token + random port come from the Electron wrapper
+        // via env; the bridge rejects requests without the correct token.
+        ...(TOKEN ? { "x-dsh-notify-token": TOKEN } : {})
+      },
       body
     }).catch(() => { /* bridge offline is fine */ });
   } catch {

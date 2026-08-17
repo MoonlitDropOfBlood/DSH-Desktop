@@ -73,25 +73,71 @@ jobs:
       - name: Build dmg (${{ matrix.arch }})
         # GitHub 的 macos-14 runner 是 Apple Silicon；electron-builder 可在其上
         # 交叉构建 x64 与 arm64 的 dmg（macos-13/Intel runner 已被 GitHub 弃用）。
+        #
+        # 代码签名 + 公证（推荐，让 mac 用户双击即可打开、不再提示"已损坏/未验证"）：
+        #   1. 需要一个付费的 Apple Developer 账号；
+        #   2. 在 Keychain 生成 "Developer ID Application" 证书，导出为 .p12；
+        #   3. 在仓库 Settings → Secrets 里配置：
+        #      - CSC_LINK            = .p12 证书的 base64 或路径
+        #      - CSC_KEY_PASSWORD    = .p12 密码
+        #      - APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+        #        （或 APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER）
+        #   4. 以上 Secrets 全部配好后，本 step 会自动签名并 notarytool 公证。
+        #      注意：签名凭据与公证凭据要么都配、要么都不配，只配一半会构建失败。
+        #
+        # 也可以不买账号、用"自制（自签名）证书"签名（scripts/mac-sign.js 兜底之外的选择）：
+        #   - 在 Windows 上 `New-SelfSignedCertificate -Type CodeSigningCert` 生成并导出 .p12，
+        #     把 base64 配到 CSC_LINK、密码配到 CSC_KEY_PASSWORD、证书名配到 CSC_NAME。
+        #   - 自签名证书只能在"安装了该证书并信任它"的 Mac 上免提示打开；其他用户仍是
+        #     "无法验证开发者"（右键→打开）。要在所有 Mac 上免提示，仍需要付费 Developer ID + 公证。
+        # 未配置 Secrets 时：mac 包会走 scripts/mac-sign.js 的 ad-hoc 自签名兜底
+        # （"已损坏" → "无法验证开发者"）。
         run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # --- 代码签名（Developer ID 或自制自签名证书均可，证书文件不要提交到仓库）---
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_NAME: ${{ secrets.CSC_NAME }}
+          # --- 公证（方式一：Apple ID + 专用密码）---
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # --- 公证（方式二：App Store Connect API Key，与方式一选一）---
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       - uses: actions/upload-artifact@v4
         with:
           name: mac-${{ matrix.arch }}-dmg
           path: dist/*.dmg
 
   # 单独发布：把所有平台产物合成一个正式 Release（只对 v* 标签触发，避免生成 draft）。
+  # Release 说明取自 CHANGELOG.md 中 "## [<版本号>]" 一节（打标签前先写好该节）。
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-windows, build-linux, build-mac]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+      - name: Extract CHANGELOG section for this release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e '
+            const fs = require("fs");
+            const version = process.argv[1];
+            const text = fs.readFileSync("CHANGELOG.md", "utf8");
+            const esc = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const re = new RegExp("## \\[" + esc + "\\][\\s\\S]*?(?=\\n## \\[|$)", "m");
+            const m = text.match(re);
+            fs.writeFileSync("RELEASE_BODY.md",
+              (m ? m[0].trim() : "（CHANGELOG.md 中未找到 ## [" + version + "] 章节）") + "\n");
+          ' "$VERSION"
       - name: List artifacts
         run: ls -la artifacts/
       - uses: softprops/action-gh-release@v2
@@ -100,7 +146,8 @@ jobs:
           name: ${{ github.ref_name }}
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false # 用 CHANGELOG 作为发布说明，不依赖 PR 标题
+          body_path: RELEASE_BODY.md
           files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}

@@ -198,14 +198,57 @@ window.__ModuleLoader__.load({
 			);
 		}
 
-		/** 桌面版: shell behaviour — 常驻通知栏 / 阻止休眠 / 任务通知. */
+		/** 桌面版: shell behaviour — 壳版本/更新 + 常驻通知栏 / 阻止休眠 / 任务通知. */
 		function DesktopSection() {
 			const state = useUpdateState();
 			const [toast, setToast] = React.useState(null);
+			const [shellChecking, setShellChecking] = React.useState(false);
+			const [shellInfo, setShellInfo] = React.useState(null); // { shellHasUpdate, shellLatest, shellAssetName }
+			const [downloading, setDownloading] = React.useState(false);
+			const [dlProgress, setDlProgress] = React.useState(null);
 			if (!hasBridge("getUpdateState")) return React.createElement(NoShell);
 			const closeToTray = state ? !!state.closeToTray : false;
 			const preventSleep = state ? !!state.preventSleep : false;
 			const taskNotify = state ? !!state.taskNotify : false;
+
+			// Shell self-update progress pushes from the main process.
+			React.useEffect(() => {
+				if (!hasBridge("onShellDownloadProgress")) return undefined;
+				const off = bridge().onShellDownloadProgress((p) => {
+					if (!p) return;
+					if (p.error) {
+						setDlProgress(null);
+						setDownloading(false);
+						setToast({ text: "下载失败：" + p.error });
+					} else {
+						setDlProgress(p);
+					}
+				});
+				return () => { if (typeof off === "function") off(); };
+			}, []);
+
+			const doShellCheck = () => {
+				setShellChecking(true);
+				bridge().checkShellUpdate()
+					.then((r) => {
+						setShellInfo(r);
+						if (r && r.error) setToast({ text: r.error });
+						else if (r && !r.shellHasUpdate) setToast({ text: "壳已是最新版本 " + (r.shellLatest || "") });
+					})
+					.catch(() => setToast({ text: "检查失败" }))
+					.finally(() => setShellChecking(false));
+			};
+			const doShellDownload = () => {
+				setDownloading(true);
+				setDlProgress({ percent: 0 });
+				bridge().downloadShellUpdate()
+					.then((r) => {
+						if (r && r.ok) setToast({ text: "更新包已下载，正在启动安装程序…" });
+						else setToast({ text: (r && r.error) || "下载失败" });
+					})
+					.catch(() => setToast({ text: "下载失败" }))
+					.finally(() => setDownloading(false));
+			};
 			const toggleTray = () => {
 				bridge().setCloseToTray(!closeToTray);
 				setToast({ text: !closeToTray ? "已开启：关闭窗口将最小化到通知栏" : "已关闭：关闭窗口即退出" });
@@ -219,11 +262,37 @@ window.__ModuleLoader__.load({
 				setToast({ text: !taskNotify ? "已开启：任务完成/失败/需确认时发送桌面通知" : "已关闭：不再发送任务通知" });
 			};
 
+			const shellVersion = (state && state.shellVersion) || "未知";
+			const shellUpdateAvailable = !!(shellInfo && shellInfo.shellHasUpdate);
+
 			return React.createElement(
 				"div",
 				{ className: "dsh-desktop-settings" },
 				toast ? React.createElement(Toast, { text: toast.text, onDone: () => setToast(null) }) : null,
 				React.createElement(SectionHeader, { icon: React.createElement(IconDesktop), title: "桌面版" }),
+				React.createElement("div", { className: "dsh-desktop-row" },
+					React.createElement("span", { className: "dsh-desktop-label" }, "壳版本"),
+					React.createElement("span", { className: "dsh-desktop-value" }, shellVersion),
+					React.createElement(Button, {
+						variant: "outline", size: "sm", disabled: shellChecking || downloading,
+						onClick: doShellCheck
+					}, shellChecking ? "检查中…" : "检查更新")),
+				shellUpdateAvailable
+					? React.createElement("div", { className: "dsh-desktop-row dsh-desktop-actions" },
+						React.createElement(Button, {
+							variant: "solid", size: "sm", disabled: downloading, onClick: doShellDownload
+						}, downloading
+							? (dlProgress && dlProgress.percent != null ? "下载中 " + dlProgress.percent + "%" : "下载中…")
+							: "下载 " + (shellInfo.shellLatest || "") + " 安装包"),
+						React.createElement("span", { className: "dsh-desktop-new" },
+							"发现新版本 " + (shellInfo.shellLatest || "")))
+					: null,
+				dlProgress && dlProgress.percent != null && !shellUpdateAvailable
+					? React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
+						"正在下载更新包：" + dlProgress.percent + "%（" +
+						(Number(dlProgress.downloadedMB) || 0).toFixed(1) + " / " +
+						(Number(dlProgress.totalMB) || 0).toFixed(0) + " MB）")
+					: null,
 				React.createElement("div", { className: "dsh-desktop-row" },
 					React.createElement("span", { className: "dsh-desktop-label" }, "常驻通知栏"),
 					React.createElement("label", { className: "dsh-desktop-toggle" },
@@ -248,16 +317,23 @@ window.__ModuleLoader__.load({
 
 		const CSS = `
 /* Immersive window controls: transparent group floating in the top-right
-   corner. The drag handle occupies the left part of the strip; the three
-   buttons are no-drag and only show a background on hover. */
+   corner. Drag handling lives on a DEDICATED sibling strip (never nested in
+   the same element as the buttons): on macOS, -webkit-app-region: drag on an
+   ancestor can swallow clicks from no-drag children, making the buttons dead.
+   The container itself carries no app-region; buttons are no-drag + explicit
+   pointer-events:auto so clicks always land. */
 .dsh-desktop-controls {
   position: fixed; top: 0; right: 0; height: 36px; width: 150px;
   display: flex; align-items: stretch; z-index: 2147483000;
-  -webkit-app-region: drag; user-select: none;
+  pointer-events: auto; user-select: none;
 }
-.dsh-desktop-controls .dsh-desktop-drag { flex: 1; }
+.dsh-desktop-controls .dsh-desktop-drag {
+  position: absolute; top: 0; bottom: 0; left: 0; right: 132px;
+  -webkit-app-region: drag;
+}
 .dsh-desktop-controls .dsh-desktop-btn {
-  -webkit-app-region: no-drag; width: 44px; height: 100%; border: none; background: transparent;
+  -webkit-app-region: no-drag; pointer-events: auto; width: 44px; height: 100%;
+  border: none; background: transparent;
   color: #9aa5b8; font-size: 14px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer; transition: background 0.12s, color 0.12s;
