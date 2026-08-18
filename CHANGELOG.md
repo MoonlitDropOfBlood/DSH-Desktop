@@ -8,11 +8,51 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-19
+
+### 新增
+
+- **内置 Node.js（解决 mac 从 Finder/Dock 启动无 node/npm 的根本问题）**：macOS 从
+  Finder/Dock 启动的 app 没有用户 shell 的 PATH，`spawn("node")`/`spawn("npm")` 会
+  ENOENT。现在把官方 Node 发行版（默认 v22.14.0，自带 npm）随 app 一起打包到
+  `resources/node/`（`scripts/fetch-node.js` 下载到 `build/node/<os>-<arch>/`，
+  electron-builder `extraResources` 按 `${os}-${arch}` 分发）。运行时优先用内置
+  node 跑 DSH，npm 用 `node <npm-cli.js>` 跑（不依赖 PATH，Windows 顺带绕开 cmd 引号坑）；
+  找不到内置时才回退系统 node。CI 各构建 job 已加入 fetch 步骤。
+- **继承终端 Profile（默认开启，MCP 修复）**：macOS 从 Finder/Dock 启动的 app 没有
+  用户 shell 的环境变量，DSH 拉起的 **MCP 服务**（npx/uvx/python 等）找不到可执行文件。
+  桌面壳在**启动 DSH 之前**加载用户登录+交互 shell（`<shell> -l -i -c env`，带超时）导出的
+  环境变量，合并进 DSH 子进程环境——MCP 作为 DSH 的子进程，启动时就有终端环境。桌面版
+  设置新增「继承终端 Profile」开关（默认开），关闭后下次 DSH 重启生效。
+
 ### 修复
 
 - **macOS 未签名导致"已损坏，无法打开"**：新增 `scripts/mac-sign.js`（`afterPack` 钩子）——
   未配置 Developer ID 证书时自动对 .app 做 **ad-hoc 自签名**，把 arm64 上吓人的"已损坏"错误变成标准的
   "无法验证开发者"（右键 → 打开 即可运行）。配置了 Developer ID 证书时该钩子不生效。
+- **macOS 全选/复制/粘贴失效**：应用菜单缺少「编辑」角色菜单，macOS 不会把 Cmd+C/V/X/A
+  路由给页面——补上标准的撤销/剪切/复制/粘贴/全选角色菜单。
+- **macOS 托盘图标显示过大**：菜单栏需要小尺寸的「模板」图标（黑 + 透明），原 64px
+  彩色图标渲染过大——新增 16px/32px@2x 黑色鲸鱼模板图（`build/tray-iconTemplate*.png`）。
+- **subagent 完成任务也弹通知**：任务通知对「任务完成」只弹**主 agent** 完成（subagent
+  频繁完成是噪音，不再逐个弹窗）；主 agent 完成、任务失败、需要确认时才会弹桌面通知。
+- **macOS 无法拖动窗口**：原拖拽区只是右上角控制条内 18px 的细缝；改为从侧栏右缘延伸到
+  按钮的整条 36px 顶部拖拽区（除右侧按钮外均可拖）。
+- **会话头部向左避让关闭按钮**：原 CSS 把会话头部右侧工具向左推 150px（`padding-right`）
+  以避开右上角控制条，很丑；最终方案：**把 Session log 按钮搬进窗口控制条**（最小化按钮
+  左边，四周留呼吸间距），CSS 隐藏 DSH 头部的原按钮——会话头部完全恢复原始布局
+  （crumbs/tabs 间距不变），不再用任何下移/左挤 hack。**没有打开的会话、或空白新会话
+  （还没有对话内容）时不显示该按钮**（订阅 `sessions.list`：`current` 有值且该会话
+  `summary.blank` 不为 true 才渲染，与 DSH 头部隐藏逻辑一致；控制条用 `MutationObserver`
+  在按钮出现/消失时重新测量拖拽区终点）。侧栏保持通顶不被遮挡——控制条从侧栏右缘开始
+  （JS 实时测量侧栏宽度与按钮起点）。
+- **GitHub Release 说明只有版本号+日期**：发布工作流提取 CHANGELOG 章节的正则带了 `m`
+  标志，懒匹配在标题行就停住，Release 说明只剩 `## [x.y.z] - 日期` 一行——去掉 `m` 标志，
+  Release 说明现在包含完整的变更列表。
+
+### 变更
+
+- 壳版本号 `1.1.0 → 1.2.0`。
 
 ## [1.1.0] - 2026-08-18
 

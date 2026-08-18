@@ -5,5 +5,7 @@ release/
 .electron-cache/
 .test-home/
 .fresh-home/
+build/node/
+build/.node-tmp-*/
 *.log
 *.tgz

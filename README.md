@@ -19,6 +19,8 @@
 
 **DSH 核心不打进安装包**：目标机器首次启动时自动通过 `npm` 安装最新版 DSH，之后直接复用本机已有的完整安装——既保持轻量，又能随时更新到最新。
 
+**Node.js 运行时内置**：app 自带一份官方 Node（含 npm，随安装包分发），启动 DSH、安装/更新核心完全不需要用户机器上装有 node/npm——macOS 上从 Finder/Dock 启动也不会因为缺少用户 shell 的 PATH 而失败。
+
 > **DSH 来自哪个 npm 仓库？** 核心 `@deepseek-ai/dsh` 发布在官方 **npmjs.org**（`https://registry.npmjs.org`）。国内网络下默认使用 npmmirror 镜像（`registry.npmmirror.com`），探测不可用或安装失败时会自动回退 npmjs.org，也可用 `DSH_DESKTOP_NPM_REGISTRY` 指定。安装过程会显示**实时进度条与已下载大小**。
 
 ## 主要功能
@@ -41,7 +43,11 @@
     </td>
     <td width="50%" valign="top">
       <h3>任务通知</h3>
-      <p>任务完成、失败或需要确认时发送桌面通知；可选「阻止休眠」，任务运行期间防止系统睡眠。</p>
+      <p>主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）；可选「阻止休眠」，任务运行期间防止系统睡眠。</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>继承终端 Profile</h3>
+      <p>自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，此开关默认开启。</p>
     </td>
   </tr>
 </table>

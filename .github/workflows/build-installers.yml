@@ -23,6 +23,12 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Fetch bundled Node (x64 + ia32)
+        run: |
+          node scripts/fetch-node.js win x64
+          node scripts/fetch-node.js win ia32
+        env:
+          DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
       - name: Build NSIS (x64 + ia32)
         run: npx electron-builder --win nsis --x64 --ia32 --publish never
         env:
@@ -42,6 +48,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Fetch bundled Node
+        run: node scripts/fetch-node.js linux x64
+        env:
+          DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
       - name: Build AppImage + deb + rpm
         run: npx electron-builder --linux --publish never
         env:
@@ -70,6 +80,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Fetch bundled Node (${{ matrix.arch }})
+        run: node scripts/fetch-node.js mac ${{ matrix.arch }}
+        env:
+          DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
       - name: Build dmg (${{ matrix.arch }})
         # GitHub 的 macos-14 runner 是 Apple Silicon；electron-builder 可在其上
         # 交叉构建 x64 与 arm64 的 dmg（macos-13/Intel runner 已被 GitHub 弃用）。
@@ -133,7 +147,12 @@ jobs:
             const version = process.argv[1];
             const text = fs.readFileSync("CHANGELOG.md", "utf8");
             const esc = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const re = new RegExp("## \\[" + esc + "\\][\\s\\S]*?(?=\\n## \\[|$)", "m");
+            // Capture the whole "## [<version>]" section (heading + change list),
+            // stopping right before the NEXT "## [" heading or the end of the file.
+            // NOTE: no "m" flag on purpose — with the multiline flag the lazy
+            // [\s\S]*? would stop at $ (end-of-line) right after the heading, so
+            // the release body would only contain the "version + date" line.
+            const re = new RegExp("## \\[" + esc + "\\][\\s\\S]*?(?=\\n## \\[|$)", "");
             const m = text.match(re);
             fs.writeFileSync("RELEASE_BODY.md",
               (m ? m[0].trim() : "（CHANGELOG.md 中未找到 ## [" + version + "] 章节）") + "\n");

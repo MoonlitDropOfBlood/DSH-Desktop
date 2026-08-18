@@ -25,8 +25,10 @@ dsh-desktop/
 │   └── client.js           #   Client 半部：窗口控制条、侧栏更新徽章、设置页
 ├── scripts/
 │   ├── make-tray-icon.js   # 用 @resvg/resvg-js 从 whale.svg 生成各尺寸图标
+│   ├── fetch-node.js       # 下载官方 Node 发行版（含 npm）到 build/node/<os>-<arch>/
 │   └── embed-exe-icon.js   # 本机无法解压 winCodeSign 时，用 rcedit 手动嵌 exe 图标
 └── build/
+    ├── node/               # 内置 Node（gitignore；打包时经 extraResources 随 app 分发）
     ├── whale.svg           # DeepSeek 鲸鱼矢量源（从 DSH FishLogo 提取）
     ├── icon.png            # 256px（Windows）
     ├── icon-512.png        # 512px（macOS / Linux）
@@ -50,6 +52,25 @@ dsh-desktop/
 **DSH 的 npm 仓库**：`@deepseek-ai/dsh` 发布在官方 **npmjs.org**（`https://registry.npmjs.org`），国内常用 npmmirror 镜像同步。默认 `DEFAULT_NPM_REGISTRY` = npmmirror（国内快），探测/失败时回退 npmjs.org。可用 `DSH_DESKTOP_NPM_REGISTRY` 覆盖。
 
 **不要用 `npx` 启动 DSH**：本机网络下 npx 在线解析 `@latest` 会挂死在 CDN 节点，`npx --offline` 在 npm 11 + 大缓存下病态空转。**直接 `node <bin> web --patch <patch>` 最可靠**。
+
+### 1b. 内置 Node（`scripts/fetch-node.js` + extraResources → `resources/node`）
+
+**macOS 大坑（为什么必须内置）**：从 Finder/Dock 启动的 mac app **没有用户 shell 的 PATH**（不是沙盒问题，是 LaunchServices 不给环境变量），`spawn("node")`/`spawn("npm")` 直接 ENOENT。**根治方案 = 把官方 Node 发行版（自带 npm）打包进 app**，运行时用绝对路径跑，完全不管用户装没装 node：
+
+- **获取**：`node scripts/fetch-node.js <os> <arch>`（os ∈ win/mac/linux，arch ∈ x64/ia32/arm64；默认当前平台）。下载官方发行版（默认 v22.14.0，`DSH_DESKTOP_NODE_VERSION` 覆盖；镜像默认 npmmirror → 回退 nodejs.org，`DSH_DESKTOP_NODE_MIRROR` 覆盖），解压到 `build/node/<os>-<arch>/`（`${os}` 用 electron-builder 的 win/mac/linux 命名）。幂等：已有就跳过。`npm run dist:*` 会自动先 fetch。
+- **分发**：`build.extraResources` 的 `{ from: "build/node/${os}-${arch}", to: "node" }` —— `${os}`/`${arch}` 宏按目标平台/架构展开，装到 app 的 `resources/node/`。CI 各 job 构建前先 fetch 对应架构（见 workflow）。
+- **运行时解析**（main.js）：
+  - `resolveNodeExecutable()` 优先级：**内置 node**（`<resources>/node/node.exe` 或 `bin/node`）→ 环境变量（`npm_node_execpath` / `DSH_DESKTOP_NODE`）→ 常见安装位置扫描（Homebrew/nvm/fnm/volta/asdf/mise）→ PATH(`"node"`)。
+  - **npm 不依赖 PATH**：内置时用 `node <resources>/node/[lib/]node_modules/npm/bin/npm-cli.js <args>` 跑 npm（`npmSpawn()`），Windows 也不用 cmd（顺带绕开 cmd 引号坑）；非内置回退 Windows `cmd /d /s /c npm`、unix 解析出的 npm。
+  - `childEnv()` 把内置 node 的 bin 目录 prepend 进 PATH，DSH 子进程也能找到 node/npm。
+- **开发时**（`npm start`）：`resourcesPath` 里没有内置 node → 走系统 node，行为不变。
+- 目录 `build/node/` 已 gitignore（每个架构 ~30MB 压缩 / ~100MB 解压，不入库）。
+
+### 1c. 继承终端 Profile（MCP 修复，设置"继承终端 Profile"默认开）
+
+**问题**：从 Finder/Dock 启动的 mac app 没有用户 shell 的环境变量，DSH 继承的就是这个"裸"环境，DSH 拉起的 **MCP 服务**（npx/uvx/python 等子进程）找不到可执行文件，起不来。
+
+**机制（保证在 MCP 之前）**：桌面壳在主进程 **spawn DSH 之前**用 `execFileSync` 跑用户的登录+交互 shell（`<shell> -l -i -c env`，依次回退 `-l`、`-i`，8s 超时，`PS1=''` + 过滤 `KEY=VALUE` 行），把导出的环境变量解析出来，合并进 `childEnv()`。**合并语义 = 用户环境优先**：`childEnv()` 基底就是应用自身的 `process.env`（终端启动、`launchctl setenv`、LaunchAgent 注入的变量全都在，直接透传给 DSH/MCP）；Profile 只**补缺**（应用已有的 key 不被覆盖，避免 `.zshrc` 覆盖你在启动前 export 的值）；PATH 特殊处理——Profile 的 PATH **前置**（裸环境下 MCP 必须要用户 PATH），内置 node 的 bin 目录再 prepend 最前。DSH 是 MCP 的父进程 → MCP 一定在出生时就有终端环境。Windows 跳过（注册表环境已够用）。开关存 `update-settings.json` 的 `inheritTerminalProfile`（默认 true），桌面版设置页可关；`_terminalEnv` 缓存，切开关后置空、下次 DSH 重启生效（`restartDSH`/更新时）。
 
 ### 2. 客户端插件挂载（`prepareDesktopPlugin` + `--patch`）
 
@@ -83,9 +104,11 @@ window.__ModuleLoader__.load({
 |---|---|---|
 | `preload` 的 `dshDesktop.*` IPC | 渲染进程(DSH 页面)→主进程 | 窗口控制、设置读写、更新、重启 |
 | `dsh:update-state` 事件 | 主进程→渲染进程 | 推送版本/设置状态给插件 UI |
-| **通知桥** `http://127.0.0.1:<随机端口>` | DSH Host 进程→Electron 主进程 | 任务通知（`agent/status` 等事件转发） |
+| **通知桥** `http://127.0.0.1:<随机端口>` | DSH Host 进程→Electron 主进程 | 任务通知（主 agent 完成 `agent/status` / `agent/error` / `approval/request` 转发） |
 
-任务通知：插件 **Host 半部**（index.js，运行在 DSH 进程里）监听 `agent/status`(running→idle=完成)、`agent/error`(失败)、`approval/request`(waterfall，需调 next)，POST 到主进程的本地 HTTP 桥，主进程弹 `Notification`。
+任务通知：插件 **Host 半部**（index.js，运行在 DSH 进程里）监听 `agent/status`(running→idle=完成，**仅主 agent**)、`agent/error`(失败)、`approval/request`(waterfall，需调 next)，POST 到主进程的本地 HTTP 桥，主进程弹 `Notification`。
+**subagent 完成不通知**（频繁完成，逐个弹窗是噪音）——subagent 的 session header 带
+`parentSession`/`origin:'subagent'`/`delegationDepth≥1`，据此过滤；只有**主 agent** 完成、失败、需要确认才弹。
 
 **通知桥安全（重要）**：
 - **焦点抑制**：桌面窗口**有焦点且可见时不弹通知**（用户正在看 DSH，任务状态已内联显示；弹原生通知只是噪音），只在后台/最小化/藏托盘时才通知。判断：`mainWindow.isVisible() && isFocused() && !isMinimized()`。
@@ -96,20 +119,21 @@ window.__ModuleLoader__.load({
 
 ### 4. 窗口控制条（沉浸式，不重叠）
 
-- frameless 窗口；控制条用 `shell.overlay` Slot，`position: fixed; top:0; right:0`，宽度 150px，**左侧可拖拽**（`-webkit-app-region: drag`），按钮 `no-drag`。
+- frameless 窗口；控制条用 `shell.overlay` Slot，是一条 **36px 顶部条**，**起点 = 侧栏右缘**（插件/兜底都用 JS 量侧栏 `getBoundingClientRect().right` 设 `left`，侧栏收窄/折叠/窗口缩放时用 `ResizeObserver` + `resize` 同步），**除右侧按钮外整条可拖拽**（`-webkit-app-region: drag`），按钮 `no-drag`。
 - **macOS 按钮点不动（大坑）**：`-webkit-app-region: drag` 放在**父容器**上时，macOS 会把整条区域当成拖拽区，`no-drag` 子按钮偶尔收不到点击。**修复**：容器本身**不带 app-region**，改用一个独立的绝对定位 `.dsh-desktop-drag` 兄弟条（`left:0; right:132px`）承载 `drag`，按钮显式 `no-drag` + `pointer-events:auto`（`shell.overlay` 宿主层是 `pointer-events:none`，子级靠 `.overlayLayer>*{pointer-events:auto}` 恢复，仍要显式加固）。
-- 与 DSH 会话头部右上角（Session log 等）不重叠的关键：注入 CSS
-  `[class*="headerUtilities"] { padding-right: 150px !important; }`
-  （CSS modules 混淆类名保留 `headerUtilities` 子串，可稳定匹配）。
-- **兜底控制条**：主进程在 DSH 页 `did-finish-load` 后延迟 1.5s/6s 用 `executeJavaScript` 检查 `.dsh-desktop-controls`；若插件没挂上（核心/插件加载失败），注入一套原生样式的 `.dsh-desktop-fallback` 按钮条（最小化/最大化/关闭），保证 frameless 窗口永远可关。
+- **窗口拖拽区**：原来拖拽区只是右上角 150px 控制条里 18px 的细缝，macOS 上基本拖不动。现在控制条从侧栏右缘一直延伸到按钮，从顶部按住拖动即可移动窗口。
+- **侧栏保持通顶、不被遮挡**：控制条从侧栏右缘才开始（JS 测量），侧栏品牌/折叠按钮永远可点、侧栏背景通到窗口顶部。**不要**用"整个 AppFrame 下移"方案（`div:has(> [data-shell-overlay]){padding-top:36px}`）——那样侧栏顶部会空出 36px 页面背景的缝，很难看。
+- **Session log 按钮搬进控制条**：DSH 头部原来在右上角的 "Session log" 按钮与控制条按钮相撞。**不再用任何"下移/左挤"方案**（`padding-right:150px`、整屏下移、整行/单按钮下移都已废弃——都会拉高头部或留下难看的空隙）。改为：① 在控制条里**最小化按钮左边**重做一个 `Session log` 胶囊按钮（`SessionLogButton`，`ctx.sessions.list.getSnapshot().current` 拿当前会话 id，复刻 `dsh-session-log-export` 的下载逻辑：`HEAD /api/session.export?sessionId=<id>&includeDescendants=true` 后触发浏览器下载）；② CSS `[data-dsh-desktop] [class*="sessionLogButton"]{display:none!important}` 隐藏 DSH 原按钮——**只限桌面**：`apply()` 检测到 Electron 桥（`window.dshDesktop`）时给 `<html>` 打 `data-dsh-desktop` 标记，普通浏览器不打标记、保留 DSH 原按钮（桌面壳拉起的同一个 DSH 实例被浏览器直接访问时，插件仍挂载，必须靠这个标记区分）。**会话头部完全保持原始布局**（crumbs/tabs 间距不变）。③ 按钮**只在有打开的、且已有对话内容的会话时显示**——`SessionLogButton` 订阅 `sessions.list`：`current` 有值 **且** 该会话 `summary.blank` 不为 true 才渲染（空白新会话——还没有任何对话内容——不显示，与 DSH 头部隐藏逻辑一致）；控制条用 `MutationObserver` 监听子节点变化，按钮出现/消失时重新测量拖拽区终点，避免拖拽区盖住按钮。
+- **拖拽区终点 = 按钮起点**：控制条 `left` 用 JS 量侧栏右缘，拖拽区 `right` 也用 JS 量最左按钮（Session log 胶囊宽度不固定，不能写死 132px）——`window.innerWidth - firstBtnRect.left`，随窗口缩放/侧栏变化同步。
+- **兜底控制条**：主进程在 DSH 页 `did-finish-load` 后延迟 1.5s/6s 用 `executeJavaScript` 检查 `.dsh-desktop-controls`；若插件没挂上（核心/插件加载失败），注入一套原生样式的 `.dsh-desktop-fallback` 按钮条（同样从侧栏右缘开始 + 拖拽条，最小化/最大化/关闭），保证 frameless 窗口永远可关。
 - **原生逃生通道**：菜单加 `CmdOrCtrl+M`（最小化）/ `CmdOrCtrl+W`（关闭窗口）；macOS 上 Cmd+Q 走系统 appMenu。即使页面 DOM 按钮全部失效也能关窗/退出。
-- 不要用"整行标题栏 + body padding-top"方案——用户明确要**沉浸式**（DSH 占满窗口、无标题栏条）。
+- **macOS 复制/粘贴/全选失效（大坑）**：frameless Electron 应用没有「编辑」菜单时，macOS 不把 Cmd+C/V/X/A 路由到页面。**修复**：`buildMenu()` 里加标准角色子菜单（`undo/redo/cut/copy/paste/selectAll`），Windows/Linux 也一并获得对应快捷键。
 
 ### 5. 托盘（`Tray`）+ 常驻通知栏
 
 - 设置"常驻通知栏"开启后，关窗 `event.preventDefault()` + `mainWindow.hide()` 到托盘；托盘右键菜单"打开/退出"。
 - **托盘图标在开启设置的当下就创建**（`whenReady` 时 `readSettings().closeToTray && ensureTray()`；开关 IPC 里 `setCloseToTray` 即时 `ensureTray()/destroyTray()`）——**不能只在用户点关闭时才建托盘**，否则用户不开窗就永远看不到图标、也没法恢复窗口。
-- 托盘图标 = `build/tray-icon.png`（DeepSeek 蓝圆角 + 白鲸鱼，带边距）。Linux 无托盘环境 `new Tray` 失败会优雅降级（关窗直接退出）。
+- 托盘图标：Windows/Linux 用 `build/tray-icon.png`（DeepSeek 蓝圆角 + 白鲸鱼，带边距）；**macOS 必须用小尺寸「模板」图**（菜单栏图标，黑 + 透明），用 `build/tray-iconTemplate.png`(16px) + `tray-iconTemplate@2x.png`(32px)，`setTemplateImage(true)` 让系统按明/暗菜单栏着色——原 64px 彩色图在 Mac 菜单栏会显示得过大。Linux 无托盘环境 `new Tray` 失败会优雅降级（关窗直接退出）。
 - 真正退出（菜单退出、更新重启、app.quit）必须先 `isQuitting = true`，否则 close 拦截会把窗口藏进托盘。
 - macOS `activate`（点 Dock 图标）改为：窗口存在（哪怕藏在托盘）就 `show()+focus()`，否则重建——否则 Dock 点了没反应。
 
@@ -121,7 +145,7 @@ window.__ModuleLoader__.load({
 ### 7. 图标
 
 - 源 = `build/whale.svg`（DeepSeek 鲸鱼，从 `@deepseek-ai/dsh-client-ui-primitives` 的 `FishLogo` 提取的 path）。
-- `npm run icon` 用 `@resvg/resvg-js`（纯 Node SVG 光栅化）生成 64/256/512 PNG。**不要用 Electron 离屏渲染**（本机 >128px 就崩）。
+- `npm run icon` 用 `@resvg/resvg-js`（纯 Node SVG 光栅化）生成 64/256/512 PNG，外加 macOS 托盘模板图 `tray-iconTemplate.png`(16px)/`tray-iconTemplate@2x.png`(32px，黑色鲸鱼+透明)。**不要用 Electron 离屏渲染**（本机 >128px 就崩）。
 - electron-builder 的 `win.icon`/`mac.icon`/`linux.icon` 打包时自动转换 .ico/.icns。
 - Windows 任务栏图标跟随 **exe 资源图标**（开发 `npm start` 显示 electron 默认图标，打包后才是鲸鱼——Electron 固有限制）。
 
@@ -162,11 +186,12 @@ window.__ModuleLoader__.load({
 ```bash
 npm install          # 装依赖（首次）
 npm run icon         # 重新生成图标（改了鲸鱼配色/边距后）
-npm start            # 开发运行（frameless 窗口）
+npm start            # 开发运行（frameless 窗口；用系统 node）
+npm run fetch:node   # 下载内置 Node（当前平台/架构）到 build/node/<os>-<arch>/
 npm run pack         # 打包目录到 dist/win-unpacked/
-npm run dist:win     # NSIS 安装包
-npm run dist:mac     # macOS dmg
-npm run dist:linux   # Linux AppImage
+npm run dist:win     # NSIS 安装包（会自动 fetch node）
+npm run dist:mac     # macOS dmg（会自动 fetch node）
+npm run dist:linux   # Linux AppImage（会自动 fetch node）
 ```
 
 **开发运行注意**：
@@ -217,3 +242,7 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_INSTALL_ESTIMATE_MB` | 安装进度条估算总大小（默认 250MB） |
 | `DSH_DESKTOP_INSTALL_STALL_SECONDS` | 下载无进展判定秒数（默认 120s，超时 kill npm） |
 | `DSH_DESKTOP_SHELL_REPO` | 壳自更新的 GitHub 仓库（默认 `MoonlitDropOfBlood/DSH-Desktop`） |
+| `DSH_DESKTOP_NODE` | 覆盖要 spawn 的 node 可执行文件绝对路径（默认内置 node，其次系统） |
+| `DSH_DESKTOP_NPM` | 覆盖要 spawn 的 npm 可执行文件绝对路径（仅非内置回退时用） |
+| `DSH_DESKTOP_NODE_VERSION` | `scripts/fetch-node.js` 下载的 node 版本（默认 22.14.0） |
+| `DSH_DESKTOP_NODE_MIRROR` | 内置 node 下载镜像（默认 npmmirror，回退 nodejs.org） |

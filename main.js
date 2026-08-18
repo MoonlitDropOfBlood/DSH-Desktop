@@ -25,7 +25,7 @@
  */
 
 const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeImage, powerSaveBlocker, Notification, clipboard } = require("electron");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const http = require("http");
 const https = require("https");
@@ -301,18 +301,28 @@ function ensureFallbackControls() {
       if (window.__dshDesktopFallbackInjected) return;
       window.__dshDesktopFallbackInjected = true;
       if (document.querySelector('.dsh-desktop-controls')) return; // plugin controls present
+      // Desktop mode marker — matches the plugin: only then is the DSH header's
+      // original Session log button hidden.
+      if (document.documentElement) document.documentElement.setAttribute('data-dsh-desktop', 'true');
       var css = document.createElement('style');
       css.textContent = [
-        '.dsh-desktop-fallback{position:fixed;top:0;right:0;height:36px;display:flex;align-items:stretch;z-index:2147483000;user-select:none;-webkit-app-region:no-drag}',
-        '.dsh-desktop-fallback .fb{width:44px;height:100%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#9aa5b8;font-size:14px;border:none;background:transparent;-webkit-app-region:no-drag;pointer-events:auto}',
+        // Top strip starting where the sidebar ends, drag on the left, buttons
+        // at the right — same layout as the plugin's own controls.
+        '.dsh-desktop-fallback{position:fixed;top:0;left:0;right:0;height:36px;display:flex;align-items:stretch;justify-content:flex-end;z-index:2147483000;user-select:none}',
+        '.dsh-desktop-fallback .dsh-desktop-fallback-drag{position:absolute;top:0;bottom:0;left:0;right:132px;-webkit-app-region:drag}',
+        '.dsh-desktop-fallback .fb{width:44px;box-sizing:border-box;height:22px;margin:9px 0 5px 0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#9aa5b8;font-size:14px;border:none;background:transparent;-webkit-app-region:no-drag;pointer-events:auto}',
         '.dsh-desktop-fallback .fb:hover{background:rgba(255,255,255,0.08);color:#e5e9f2}',
         '.dsh-desktop-fallback .fb-close:hover{background:#e81123;color:#fff}',
-        '[class*="headerUtilities"]{padding-right:150px !important}'
+        // Hide the DSH header's Session log button so the strip never covers it
+        // (matches the plugin: the strip holds its own re-hosted button). The
+        // header row itself is left untouched.
+        '[data-dsh-desktop] [class*="sessionLogButton"]{display:none!important}'
       ].join('');
       document.head.appendChild(css);
       var strip = document.createElement('div');
       strip.className = 'dsh-desktop-fallback';
       strip.innerHTML =
+        '<div class="dsh-desktop-fallback-drag"></div>' +
         '<button class="fb" data-a="minimize" title="最小化">\u2013</button>' +
         '<button class="fb" data-a="toggleMaximize" title="最大化/还原">\u25A1</button>' +
         '<button class="fb fb-close" data-a="close" title="关闭">\u2715</button>';
@@ -323,6 +333,25 @@ function ensureFallbackControls() {
         }
       });
       document.body.appendChild(strip);
+      // Start the strip where the sidebar ends so the sidebar's brand/toggle
+      // stay clickable; keep it in sync as the sidebar resizes / the window
+      // resizes (matches the plugin's own positioning logic).
+      function syncLeft() {
+        var overlay = document.querySelector('[data-shell-overlay]');
+        var frame = overlay && overlay.parentElement;
+        var sidebar = frame && frame.firstElementChild;
+        strip.style.left = (sidebar ? Math.round(sidebar.getBoundingClientRect().right) : 0) + 'px';
+      }
+      syncLeft();
+      window.addEventListener('resize', syncLeft);
+      if (typeof ResizeObserver !== 'undefined') {
+        try {
+          var overlay = document.querySelector('[data-shell-overlay]');
+          var frame = overlay && overlay.parentElement;
+          var sidebar = frame && frame.firstElementChild;
+          if (sidebar) new ResizeObserver(syncLeft).observe(sidebar);
+        } catch (e) { /* ignore */ }
+      }
     })();
   `, true).catch(() => {});
 }
@@ -373,8 +402,218 @@ function probeFastestRegistry(cb) {
   setTimeout(() => { if (!chosen) finish(currentRegistry); }, 10000);
 }
 
+// ---- bundled Node.js (extraResources → <resources>/node) -------------------
+// The shell bundles an official Node distribution (with npm) via
+// electron-builder extraResources, so node/npm are available even when the app
+// is launched from Finder/Dock on macOS — which gives the app NO user shell
+// PATH (the classic "cannot find node" failure). In dev (`npm start`) the
+// bundled dir is absent and we fall back to the system node.
+function bundledNodeDir() {
+  try {
+    const dir = path.join(process.resourcesPath, "node");
+    return fs.existsSync(dir) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+function bundledNodeBin() {
+  const dir = bundledNodeDir();
+  if (!dir) return null;
+  const bin = process.platform === "win32"
+    ? path.join(dir, "node.exe")
+    : path.join(dir, "bin", "node");
+  try { return fs.existsSync(bin) ? bin : null; } catch { return null; }
+}
+
+function bundledNpmCli() {
+  const dir = bundledNodeDir();
+  if (!dir) return null;
+  const cli = process.platform === "win32"
+    ? path.join(dir, "node_modules", "npm", "bin", "npm-cli.js")
+    : path.join(dir, "lib", "node_modules", "npm", "bin", "npm-cli.js");
+  try { return fs.existsSync(cli) ? cli : null; } catch { return null; }
+}
+
+let _resolvedNode = null;
+let _resolvedNpm = null;
+
+/** Best-effort scan of well-known node install locations (macOS/Linux), used
+ *  when there is no bundled node and no PATH entry. */
+function findNodeBinary() {
+  const home = process.env.HOME || "";
+  const staticDirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/opt/local/bin"];
+  if (home) staticDirs.push(`${home}/.local/bin`, `${home}/.volta/bin`, `${home}/.fnm/aliases/default/bin`);
+  for (const dir of staticDirs) {
+    try { if (fs.existsSync(path.join(dir, "node"))) return path.join(dir, "node"); } catch { /* skip */ }
+  }
+  const roots = [];
+  if (home) {
+    roots.push(`${home}/.nvm/versions/node`);                                   // nvm
+    roots.push(`${home}/.asdf/installs/nodejs`);                                // asdf
+    roots.push(`${home}/.local/share/mise/installs/node`);                      // mise
+    roots.push(`${home}/.local/share/fnm/node-versions`);                       // fnm (linux)
+    roots.push(`${home}/Library/Application Support/fnm/node-versions`);        // fnm (macOS)
+  }
+  const parseVer = (s) => { const m = String(s).match(/v?(\d+)\.(\d+)\.(\d+)/); return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0]; };
+  const cmpVer = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  let best = null;
+  let bestV = null;
+  for (const root of roots) {
+    let kids = [];
+    try { kids = fs.readdirSync(root); } catch { continue; }
+    for (const kid of kids) {
+      const candidates = [path.join(root, kid, "bin", "node"), path.join(root, kid, "installation", "bin", "node")];
+      const bin = candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } });
+      if (!bin) continue;
+      const v = parseVer(kid);
+      if (!bestV || cmpVer(v, bestV) > 0) { bestV = v; best = bin; }
+    }
+  }
+  return best;
+}
+
+/** Resolve the node binary to spawn. Priority: bundled → env override →
+ *  well-known locations → PATH ("node"). */
+function resolveNodeExecutable() {
+  if (_resolvedNode) return _resolvedNode;
+  const bundled = bundledNodeBin();
+  if (bundled) return (_resolvedNode = bundled);
+  const envNode = process.env.npm_node_execpath || process.env.DSH_DESKTOP_NODE;
+  if (envNode) { try { if (fs.existsSync(envNode)) return (_resolvedNode = envNode); } catch {} }
+  const found = findNodeBinary();
+  if (found) return (_resolvedNode = found);
+  return (_resolvedNode = "node");
+}
+
+/** Resolve a bare npm executable (PATH / next to the resolved node). */
+function resolveNpmExecutable() {
+  if (_resolvedNpm) return _resolvedNpm;
+  const envNpm = process.env.DSH_DESKTOP_NPM;
+  if (envNpm) { try { if (fs.existsSync(envNpm)) return (_resolvedNpm = envNpm); } catch {} }
+  if (process.platform !== "win32") {
+    const node = resolveNodeExecutable();
+    if (node !== "node" && path.isAbsolute(node)) {
+      const sibling = path.join(path.dirname(node), "npm");
+      try { if (fs.existsSync(sibling)) return (_resolvedNpm = sibling); } catch {}
+    }
+  }
+  return (_resolvedNpm = "npm");
+}
+
+/**
+ * How to run npm for this environment. Returns `{ command, args }`.
+ * Bundled build: run npm through the bundled node (`node <npm-cli.js> …`) so
+ * nothing depends on PATH. Windows fallback keeps the proven
+ * `cmd /d /s /c npm` form; unix fallback uses the resolved npm executable.
+ */
+function npmSpawn(commandArgs) {
+  const bundledNode = bundledNodeBin();
+  const npmCli = bundledNpmCli();
+  if (bundledNode && npmCli) {
+    return { command: bundledNode, args: [npmCli, ...commandArgs] };
+  }
+  if (process.platform === "win32") {
+    return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", "npm", ...commandArgs] };
+  }
+  return { command: resolveNpmExecutable(), args: commandArgs };
+}
+
+/** Prepend `dir` to PATH in `env` (case-insensitive key lookup on Windows). */
+function prependPath(env, dir) {
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH");
+  if (key) env[key] = dir + (env[key] ? path.delimiter + env[key] : "");
+  else env.PATH = dir;
+}
+
+// ---- inherit the user's terminal profile (macOS/Linux MCP fix) -------------
+// Launched from Finder/Dock (macOS) or a desktop launcher (Linux), the app has
+// NO user shell environment (no PATH, no exports from ~/.zshrc / ~/.bash_profile
+// …). DSH inherits that bare env, so the MCP servers it spawns cannot find
+// their binaries (npx, uvx, python, …). When the "继承系统终端 Profile" setting
+// is on (default), we load the user's login+interactive shell env and merge it
+// into the DSH child env. This happens in the desktop shell BEFORE DSH spawns —
+// MCP is a descendant of DSH, so it always gets the terminal env at birth.
+let _terminalEnv = null;
+
+/** The user's login shell (or a sane default for the platform). */
+function terminalShell() {
+  if (process.env.SHELL && path.isAbsolute(process.env.SHELL)) {
+    try { if (fs.existsSync(process.env.SHELL)) return process.env.SHELL; } catch { /* fall through */ }
+  }
+  return process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+}
+
+/** Parse `KEY=VALUE` lines out of `env` output (ignores prompts/banners). */
+function parseEnvOutput(text) {
+  const env = {};
+  if (!text) return env;
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (m) env[m[1]] = m[2];
+  }
+  return env;
+}
+
+/**
+ * Run the shell with a login+interactive profile once and capture its exported
+ * env. Best-effort with a hard timeout: a slow/hostile profile must never block
+ * startup. Returns `{}` when nothing usable comes back.
+ */
+function loadTerminalProfileSync() {
+  const shells = [terminalShell(), "/bin/zsh", "/bin/bash"].filter((s, i, a) => a.indexOf(s) === i);
+  for (const shell of shells) {
+    for (const flags of [["-l", "-i"], ["-l"], ["-i"]]) {
+      try {
+        const out = execFileSync(shell, [...flags, "-c", "env"], {
+          encoding: "utf8",
+          timeout: 8000,
+          stdio: ["ignore", "pipe", "ignore"],
+          env: { ...process.env, PS1: "", PROMPT: "" }
+        });
+        const parsed = parseEnvOutput(out);
+        if (parsed.PATH) {
+          log(`terminal profile loaded (${shell} ${flags.join(" ")})`);
+          return parsed;
+        }
+      } catch {
+        /* try the next shell/flags combo */
+      }
+    }
+  }
+  log("terminal profile unavailable — MCP may lack shell env");
+  return {};
+}
+
+/** Resolve the terminal env to merge into child processes (cached). */
+function resolveTerminalEnv() {
+  if (_terminalEnv) return _terminalEnv;
+  if (process.platform === "win32" || !readSettings().inheritTerminalProfile) {
+    return (_terminalEnv = {});
+  }
+  return (_terminalEnv = loadTerminalProfileSync() || {});
+}
+
 function childEnv() {
+  // Base = the app's OWN environment (process.env): whatever the launch context
+  // provided — a terminal launch, `launchctl setenv`, LaunchAgents, or the bare
+  // Finder/Dock env — passes straight through to DSH and every MCP server it
+  // spawns. So the user's environment variables are always respected.
   const env = { ...process.env };
+  // The terminal profile then only FILLS what the app doesn't already have
+  // (macOS/Linux GUI launch has a bare env — MCP servers need PATH etc.). The
+  // app's own value wins whenever both set the same key, so an env var the user
+  // exported before launching the app is never clobbered by re-sourcing the
+  // profile. PATH is special: the profile PATH is PREPENDED (not just gap-fill),
+  // because MCP needs the user's PATH even though the bare env always has one.
+  const terminal = resolveTerminalEnv();
+  for (const [k, v] of Object.entries(terminal)) {
+    if (k.toUpperCase() === "PATH") continue; // PATH merged below
+    if (!(k in env)) env[k] = v;
+  }
+  if (terminal.PATH) {
+    env.PATH = terminal.PATH + (env.PATH ? path.delimiter + env.PATH : "");
+  }
   env.npm_config_registry = resolveNpmRegistry();
   // Fail fast on blackholed CDN connections instead of npm stalling silently
   // for many minutes (a CDN node can accept TCP but never send data).
@@ -384,6 +623,13 @@ function childEnv() {
   env.npm_config_fetch_retry_maxtimeout = "10000";
   if (process.env.DSH_DESKTOP_HOME) env.DSH_HOME = process.env.DSH_DESKTOP_HOME;
   if (process.env.DSH_DESKTOP_NPM_CACHE) env.npm_config_cache = process.env.DSH_DESKTOP_NPM_CACHE;
+  // Make the bundled node visible to the spawned DSH (and any node/npm it
+  // starts) even without a user shell PATH. Prepend LAST so bundled node/npm
+  // win over the shell's own node.
+  const node = resolveNodeExecutable();
+  if (node !== "node" && path.isAbsolute(node)) {
+    prependPath(env, path.dirname(node));
+  }
   // Task-notify bridge credentials: only the spawned DSH process receives them,
   // so its host-half plugin can authenticate to the local bridge.
   if (notifyToken) env.DSH_DESKTOP_NOTIFY_TOKEN = notifyToken;
@@ -468,11 +714,12 @@ function runNpm(args, cwd, onExit) {
   let errBuf = "";
   const tracker = { child: null, lastOutputMs: Date.now() };
   const onData = () => { tracker.lastOutputMs = Date.now(); };
-  const child = process.platform === "win32"
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "npm", ...args], {
-        env, cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
-      })
-    : spawn("npm", args, { env, cwd, stdio: ["ignore", "pipe", "pipe"] });
+  // Bundled build runs npm through the bundled node; Windows/unix fallbacks
+  // resolve npm from PATH — see npmSpawn().
+  const { command, args: spawnArgs } = npmSpawn(args);
+  const child = spawn(command, spawnArgs, {
+    env, cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
+  });
   tracker.child = child;
   child.stdout.on("data", (c) => {
     onData();
@@ -663,7 +910,7 @@ function spawnDSH() {
 
 function doSpawn(found) {
   const { bin, base } = found;
-  const node = process.env.npm_node_execpath || "node";
+  const node = resolveNodeExecutable(); // bundled node, else system node
   const portArgs = resolvePortArgs();
   // Mount the window-controls client plugin via a --patch overlay. `--patch`
   // is a launcher flag that conflicts with the `web` SUBcommand, so use the
@@ -867,10 +1114,11 @@ function readSettings() {
       closeToTray: json.closeToTray === true,
       preventSleep: json.preventSleep === true,
       taskNotify: json.taskNotify === true,
+      inheritTerminalProfile: json.inheritTerminalProfile !== false, // default ON
       port: /^\d+$/.test(String(json.port)) ? Number(json.port) : undefined
     };
   } catch {
-    return { autoUpdate: false, closeToTray: false, preventSleep: false, taskNotify: false, port: undefined };
+    return { autoUpdate: false, closeToTray: false, preventSleep: false, taskNotify: false, inheritTerminalProfile: true, port: undefined };
   }
 }
 
@@ -901,9 +1149,11 @@ function applyPreventSleep() {
 
 // ---- 任务通知 (local HTTP bridge from the DSH host half) --------------------
 // The dsh-desktop-plugin's HOST half runs inside the DSH process; it POSTs
-// task lifecycle events (agent running→idle, error, approval needed) to this
-// tiny local server, and we raise a native desktop Notification when the
-// "任务通知" toggle is on.
+// task lifecycle events (main-agent completion, agent error, approval needed)
+// to this tiny local server, and we raise a native desktop Notification when
+// the "任务通知" toggle is on. SUBAGENT completion is intentionally not
+// forwarded — subagents finish constantly and a popup for each would be noise;
+// only the main (top-level) agent's completion is notified.
 //
 // Security: the bridge is bound to 127.0.0.1 only (never exposed to the LAN),
 // uses a RANDOM per-launch port (no fixed, predictable port to squat) and
@@ -1001,9 +1251,11 @@ function notifyTaskEvent(data) {
   if (!data || typeof data.kind !== "string") return;
   let title;
   let body = "";
+  // "done" arrives only for the MAIN agent completing (the host-half plugin
+  // filters out subagents, which finish constantly).
   if (data.kind === "done") {
     title = "任务完成";
-    body = data.summary || "Agent 已完成任务。";
+    body = data.summary || "主任务已完成。";
   } else if (data.kind === "error") {
     title = "任务失败";
     body = data.summary || "Agent 运行出错。";
@@ -1020,15 +1272,38 @@ function notifyTaskEvent(data) {
 }
 
 // ---- tray (常驻通知栏) -----------------------------------------------------
+/**
+ * Build the tray icon for the current platform. Windows/Linux use the colored
+ * 64px tile. macOS menu bars are small (≈22px) and expect a monochrome
+ * "template" image, so a full-color 64px tile renders far too large — use the
+ * dedicated 16px template (black whale + alpha) with a 2x retina
+ * representation, and mark it as a template so the system tints it to match
+ * the current menu-bar appearance (light/dark).
+ */
+function buildTrayImage() {
+  const iconPath = path.join(__dirname, "build", "tray-icon.png");
+  if (process.platform !== "darwin") {
+    return fs.existsSync(iconPath)
+      ? nativeImage.createFromPath(iconPath)
+      : nativeImage.createEmpty();
+  }
+  const t16 = path.join(__dirname, "build", "tray-iconTemplate.png");
+  const t32 = path.join(__dirname, "build", "tray-iconTemplate@2x.png");
+  const image = fs.existsSync(t16)
+    ? nativeImage.createFromPath(t16)
+    : nativeImage.createEmpty();
+  if (fs.existsSync(t32)) {
+    image.addRepresentation({ scaleFactor: 2, buffer: fs.readFileSync(t32) });
+  }
+  image.setTemplateImage(true);
+  return image;
+}
+
 /** Create the system-tray icon with a right-click menu. Idempotent. */
 function ensureTray() {
   if (tray) return;
   try {
-    const iconPath = path.join(__dirname, "build", "tray-icon.png");
-    const image = fs.existsSync(iconPath)
-      ? nativeImage.createFromPath(iconPath)
-      : nativeImage.createEmpty();
-    tray = new Tray(image);
+    tray = new Tray(buildTrayImage());
     tray.setToolTip(APP_NAME);
     const menu = Menu.buildFromTemplate([
       { label: "打开 DeepSeek Harness", click: () => showMainWindow() },
@@ -1075,6 +1350,7 @@ function pushUpdateState() {
     closeToTray: settings.closeToTray,
     preventSleep: settings.preventSleep,
     taskNotify: settings.taskNotify,
+    inheritTerminalProfile: settings.inheritTerminalProfile,
     updateAvailable: Boolean(installed && latestKnown && latestKnown !== installed)
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1086,9 +1362,8 @@ function pushUpdateState() {
 /** Query the latest published version (npm view — fast). cb(latestOrNull). */
 function queryLatest(cb) {
   const env = childEnv();
-  const child = process.platform === "win32"
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "npm", "view", DSH_SPEC, "version"], { env, windowsHide: true })
-    : spawn("npm", ["view", DSH_SPEC, "version"], { env });
+  const { command, args } = npmSpawn(["view", DSH_SPEC, "version"]);
+  const child = spawn(command, args, { env, windowsHide: true });
   let out = "";
   child.stdout.on("data", (c) => { out += c.toString(); });
   child.stderr.on("data", () => {});
@@ -1538,6 +1813,11 @@ ipcMain.handle("dsh:setTaskNotify", (_e, value) => {
   if (value === true) startNotifyServer();
   return pushUpdateState();
 });
+ipcMain.handle("dsh:setInheritTerminalProfile", (_e, value) => {
+  writeSettings({ inheritTerminalProfile: value !== false });
+  _terminalEnv = null; // re-evaluate on the next DSH spawn/restart
+  return pushUpdateState();
+});
 
 function openDSH(url) {
   if (!mainWindow || mainWindow.isDestroyed()) createWindow();
@@ -1568,6 +1848,23 @@ function buildMenu() {
         },
         { type: "separator" },
         isMac ? { role: "close" } : { role: "quit", label: "退出" }
+      ]
+    },
+    {
+      label: "编辑",
+      submenu: [
+        // Standard edit roles: these are what makes Cmd/Ctrl+C/V/X/A actually
+        // work on macOS (without an Edit menu, macOS does not route the
+        // keyboard shortcuts to the renderer — the infamous "cannot copy /
+        // paste / select all" bug in frameless Electron apps). They also add
+        // the same shortcuts on Windows/Linux.
+        { role: "undo", label: "撤销" },
+        { role: "redo", label: "重做" },
+        { type: "separator" },
+        { role: "cut", label: "剪切" },
+        { role: "copy", label: "复制" },
+        { role: "paste", label: "粘贴" },
+        { role: "selectAll", label: "全选" }
       ]
     },
     {

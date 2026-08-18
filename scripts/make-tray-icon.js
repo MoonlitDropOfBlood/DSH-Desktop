@@ -8,10 +8,12 @@
  * @resvg/resvg-js (pure Node, no Electron window) so any size renders cleanly.
  *
  * Writes:
- *   build/tray-icon.png  —  64px, system tray (main.js)
- *   build/icon.png       — 256px, Windows window/taskbar + shortcut base
- *   build/icon-512.png   — 512px, macOS / Linux (electron-builder converts to
- *                           icns / uses directly for AppImage)
+ *   build/tray-icon.png              —  64px, Windows/Linux system tray (main.js)
+ *   build/tray-iconTemplate.png      —  16px, macOS menu-bar template (black+alpha)
+ *   build/tray-iconTemplate@2x.png   —  32px, macOS retina (@2x) representation
+ *   build/icon.png                   — 256px, Windows window/taskbar + shortcut base
+ *   build/icon-512.png               — 512px, macOS / Linux (electron-builder converts to
+ *                                       icns / uses directly for AppImage)
  *
  *   npm run icon
  */
@@ -41,6 +43,27 @@ function buildIconSvg(size, whalePath) {
 </svg>`;
 }
 
+/**
+ * macOS menu-bar icons must be small "template" images: pure black + alpha, no
+ * background tile, no color. The system recolors them for light/dark menu bars
+ * and renders them at their native point size — a full-color 64px tile shows up
+ * far too large. The whale alone fills ~80% of the canvas.
+ */
+function buildTemplateSvg(size, whalePath) {
+  const vbW = 23.16;
+  const vbH = 17.04;
+  const scale = (size * 0.8) / vbW; // fit by width
+  const w = vbW * scale;
+  const h = vbH * scale;
+  const x = (size - w) / 2;
+  const y = (size - h) / 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  <g transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${scale.toFixed(5)})">
+    <path d="${whalePath}" fill="#000000"/>
+  </g>
+</svg>`;
+}
+
 function renderPng(svg, size) {
   const resvg = new Resvg(svg, { fitTo: { mode: "width", value: size } });
   return resvg.render().asPng();
@@ -56,15 +79,17 @@ function main() {
 
   const jobs = [
     { size: 64, file: "tray-icon.png" },
+    { size: 16, file: "tray-iconTemplate.png", template: true },
+    { size: 32, file: "tray-iconTemplate@2x.png", template: true },
     { size: 256, file: "icon.png" },
     { size: 512, file: "icon-512.png" }
   ];
   for (const job of jobs) {
-    const svg = buildIconSvg(job.size, whalePath);
+    const svg = job.template ? buildTemplateSvg(job.size, whalePath) : buildIconSvg(job.size, whalePath);
     const png = renderPng(svg, job.size);
     const out = path.join(outDir, job.file);
     fs.writeFileSync(out, png);
-    console.log(`wrote ${out} (${png.length} bytes, ${job.size}x${job.size})`);
+    console.log(`wrote ${out} (${png.length} bytes, ${job.size}x${job.size}${job.template ? ", template" : ""})`);
   }
 }
 
