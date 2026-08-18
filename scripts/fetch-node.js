@@ -53,6 +53,41 @@ function run(cmd, args, opts) {
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (exit ${r.status})`);
 }
 
+/**
+ * The official node dist ships bin/npm, bin/npx and bin/corepack as SYMLINKS.
+ * fpm/rpmbuild cannot package symlinks (Linux rpm target fails with
+ * "rpmbuild failed"), so replace them with real POSIX shell wrappers that exec
+ * the sibling node binary. The desktop shell itself runs npm via
+ * `node <npm-cli.js>` directly, but keeping working bin/npm & bin/npx on PATH
+ * matters for MCP servers launched through npx/npm.
+ */
+function fixNodeShims(outDir) {
+  const shims = [
+    ["npm", "../lib/node_modules/npm/bin/npm-cli.js"],
+    ["npx", "../lib/node_modules/npm/bin/npx-cli.js"],
+    ["corepack", "../lib/node_modules/corepack/dist/corepack.js"]
+  ];
+  for (const [name, cliRel] of shims) {
+    const p = path.join(outDir, "bin", name);
+    try { fs.unlinkSync(p); } catch { /* not present */ }
+    const script =
+      "#!/bin/sh\n" +
+      "basedir=$(dirname \"$(echo \"$0\" | sed -e 's,[^/]*$,,')\")\n" +
+      `exec "$basedir/node" "$basedir/${cliRel}" "$@"\n`;
+    fs.writeFileSync(p, script, { mode: 0o755 });
+  }
+  // Ensure the executable bits survive on POSIX (writeFileSync mode is a
+  // no-op on Windows, and node.exe on win has no +x concept).
+  if (process.platform !== "win32") {
+    try {
+      fs.chmodSync(path.join(outDir, "bin", "node"), 0o755);
+      fs.chmodSync(path.join(outDir, "bin", "npm"), 0o755);
+      fs.chmodSync(path.join(outDir, "bin", "npx"), 0o755);
+      fs.chmodSync(path.join(outDir, "bin", "corepack"), 0o755);
+    } catch { /* ignore */ }
+  }
+}
+
 function main() {
   const osArg = process.argv[2] || PLATFORM_OS[process.platform];
   const archArg = process.argv[3] || process.arch;
@@ -67,11 +102,18 @@ function main() {
     ? path.join(outDir, "node.exe")
     : path.join(outDir, "bin", "node");
 
-  // Idempotent: if the right node is already in place, skip.
+  // Idempotent: if the right node is already in place, skip. Only run
+  // `--version` when the binary is native to this host; otherwise existence is
+  // enough (a Windows box staging the linux bundle cannot execute it).
   if (fs.existsSync(nodeBin)) {
+    const native = PLATFORM_OS[process.platform] === osArg;
     try {
-      const v = execFileSync(nodeBin, ["--version"], { encoding: "utf8" }).trim();
-      log(`${key}: node ${v} already present — skipping`);
+      if (native) {
+        const v = execFileSync(nodeBin, ["--version"], { encoding: "utf8" }).trim();
+        log(`${key}: node ${v} already present — skipping`);
+      } else {
+        log(`${key}: node already present — skipping`);
+      }
       return;
     } catch {
       log(`${key}: stale node binary, refetching`);
@@ -97,7 +139,10 @@ function main() {
         log(`downloading ${url}`);
         // curl handles redirects + retries; available on win10+, macOS, Linux.
         run("curl", ["-L", "--fail", "--retry", "3", "--connect-timeout", "20", "-o", archive, url]);
-        if (process.platform === "win32") {
+        // Pick the extractor by the ARCHIVE FORMAT (not the current platform),
+        // so a Windows box can also stage the linux/mac bundle for inspection:
+        // zip → Expand-Archive, tar.gz → tar (bsdtar on Win10+ handles it).
+        if (ext === "zip") {
           run("powershell", ["-NoProfile", "-Command",
             `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${extractDir}' -Force`]);
         } else {
@@ -118,13 +163,19 @@ function main() {
     fs.rmSync(outDir, { recursive: true, force: true });
     fs.mkdirSync(outDir, { recursive: true });
     fs.cpSync(src, outDir, { recursive: true });
+    if (osArg !== "win") fixNodeShims(outDir);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 
-  const v = execFileSync(nodeBin, ["--version"], { encoding: "utf8" }).trim();
   const sizeMb = (fs.statSync(nodeBin).size / 1024 / 1024).toFixed(1);
-  log(`${key}: node ${v} (${sizeMb} MB binary) → ${outDir}`);
+  if (PLATFORM_OS[process.platform] === osArg) {
+    // Only run --version when the binary is native to this host.
+    const v = execFileSync(nodeBin, ["--version"], { encoding: "utf8" }).trim();
+    log(`${key}: node ${v} (${sizeMb} MB binary) → ${outDir}`);
+  } else {
+    log(`${key}: node staged (${sizeMb} MB binary, not runnable on this host) → ${outDir}`);
+  }
 }
 
 main();
