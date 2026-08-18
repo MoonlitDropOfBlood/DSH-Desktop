@@ -13,13 +13,12 @@
     "start": "electron .",
     "icon": "node scripts/make-tray-icon.js",
     "fetch:node": "node scripts/fetch-node.js",
-    "fetch:node:win": "node scripts/fetch-node.js win x64 && node scripts/fetch-node.js win ia32",
+    "fetch:node:win": "node scripts/fetch-node.js win x64",
     "fetch:node:mac": "node scripts/fetch-node.js mac x64 && node scripts/fetch-node.js mac arm64",
     "fetch:node:linux": "node scripts/fetch-node.js linux x64",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:win": "npm run fetch:node:win && electron-builder --win nsis",
-    "dist:win:x86": "npm run fetch:node:win && electron-builder --win nsis --x86",
     "dist:mac": "npm run fetch:node:mac && electron-builder --mac",
     "dist:linux": "npm run fetch:node:linux && electron-builder --linux",
     "dist:portable": "npm run fetch:node:win && electron-builder --win portable"
@@ -55,8 +54,7 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         }
       ],

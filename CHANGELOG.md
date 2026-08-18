@@ -14,7 +14,7 @@
 
 - **内置 Node.js（解决 mac 从 Finder/Dock 启动无 node/npm 的根本问题）**：macOS 从
   Finder/Dock 启动的 app 没有用户 shell 的 PATH，`spawn("node")`/`spawn("npm")` 会
-  ENOENT。现在把官方 Node 发行版（默认 v22.14.0，自带 npm）随 app 一起打包到
+  ENOENT。现在把官方 Node 发行版（默认 v24.19.0 LTS，自带 npm）随 app 一起打包到
   `resources/node/`（`scripts/fetch-node.js` 下载到 `build/node/<os>-<arch>/`，
   electron-builder `extraResources` 按 `${os}-${arch}` 分发）。运行时优先用内置
   node 跑 DSH，npm 用 `node <npm-cli.js>` 跑（不依赖 PATH，Windows 顺带绕开 cmd 引号坑）；
@@ -49,10 +49,18 @@
 - **GitHub Release 说明只有版本号+日期**：发布工作流提取 CHANGELOG 章节的正则带了 `m`
   标志，懒匹配在标题行就停住，Release 说明只剩 `## [x.y.z] - 日期` 一行——去掉 `m` 标志，
   Release 说明现在包含完整的变更列表。
+- **首发包内置 Node v22.14.0 导致 DSH 启动即失败（1.2.0 已重建）**：DSH 核心 0.1.0-rc.7
+  的会话持久化插件（`dsh-session-persistence-jsonl`）需要 `node:zlib` 的 zstd API
+  （Node ≥22.15.0 才有），而内置 node 优先级高于系统 node，导致核心一升级应用就打不开
+  （报 `does not provide an export named 'createZstdDecompress'`）。重建时内置 Node
+  升级到 **v24.19.0 LTS**；`fetch-node.js` 同时改为校验本地缓存版本与目标一致才跳过，
+  不一致强制重新下载（避免旧版本缓存被打进新安装包）。
 
 ### 变更
 
 - 壳版本号 `1.1.0 → 1.2.0`。
+- **移除 Windows 32 位（x86/ia32）安装包**：Node 官方从 24 起不再发布 win-x86 发行版，
+  无法为 32 位 Windows 内置 node，Windows 仅保留 x64（`dist:win:x86` 脚本已删除）。
 
 ## [1.1.0] - 2026-08-18
 

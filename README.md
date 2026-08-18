@@ -71,7 +71,7 @@
 
 | 平台 | 格式 |
 | --- | --- |
-| Windows | NSIS 安装器（x64 / x86） |
+| Windows | NSIS 安装器（x64） |
 | macOS | dmg（Apple Silicon / Intel） |
 | Linux | AppImage · deb · rpm |
 

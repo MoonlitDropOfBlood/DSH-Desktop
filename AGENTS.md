@@ -57,7 +57,8 @@ dsh-desktop/
 
 **macOS 大坑（为什么必须内置）**：从 Finder/Dock 启动的 mac app **没有用户 shell 的 PATH**（不是沙盒问题，是 LaunchServices 不给环境变量），`spawn("node")`/`spawn("npm")` 直接 ENOENT。**根治方案 = 把官方 Node 发行版（自带 npm）打包进 app**，运行时用绝对路径跑，完全不管用户装没装 node：
 
-- **获取**：`node scripts/fetch-node.js <os> <arch>`（os ∈ win/mac/linux，arch ∈ x64/ia32/arm64；默认当前平台）。下载官方发行版（默认 v22.14.0，`DSH_DESKTOP_NODE_VERSION` 覆盖；镜像默认 npmmirror → 回退 nodejs.org，`DSH_DESKTOP_NODE_MIRROR` 覆盖），解压到 `build/node/<os>-<arch>/`（`${os}` 用 electron-builder 的 win/mac/linux 命名）。幂等：已有就跳过。`npm run dist:*` 会自动先 fetch。
+- **获取**：`node scripts/fetch-node.js <os> <arch>`（os ∈ win/mac/linux，arch ∈ x64/arm64；默认当前平台）。下载官方发行版（默认 v24.19.0 LTS，`DSH_DESKTOP_NODE_VERSION` 覆盖；镜像默认 npmmirror → 回退 nodejs.org，`DSH_DESKTOP_NODE_MIRROR` 覆盖），解压到 `build/node/<os>-<arch>/`（`${os}` 用 electron-builder 的 win/mac/linux 命名）。幂等：本机可执行时**校验版本与目标一致才跳过**，不一致强制重下（防旧缓存被打进新包）；跨平台暂存的目录只看存在性。`npm run dist:*` 会自动先 fetch。
+- **内置 node 版本不能落后于 DSH 核心需求（1.2.0 首发的实测事故，必读）**：DSH rc.7 的 `dsh-session-persistence-jsonl` 直接 `import { createZstdDecompress, zstdCompress, … } from "node:zlib"`，zstd API 要 Node ≥22.15.0——内置 22.14.0 时 DSH **启动即炸**（`does not provide an export named 'createZstdDecompress'`），且内置 node 优先级最高，用户系统里再新的 node 也救不了。**升级内置版本时另注意：Node ≥24 官方不再发布 win-x86（32 位 Windows）发行版**，因此 Windows 只打 x64 包（ia32 相关脚本/构建目标已全部移除，别加回来）。
 - **分发**：`build.extraResources` 的 `{ from: "build/node/${os}-${arch}", to: "node" }` —— `${os}`/`${arch}` 宏按目标平台/架构展开，装到 app 的 `resources/node/`。CI 各 job 构建前先 fetch 对应架构（见 workflow）。
 - **运行时解析**（main.js）：
   - `resolveNodeExecutable()` 优先级：**内置 node**（`<resources>/node/node.exe` 或 `bin/node`）→ 环境变量（`npm_node_execpath` / `DSH_DESKTOP_NODE`）→ 常见安装位置扫描（Homebrew/nvm/fnm/volta/asdf/mise）→ PATH(`"node"`)。
@@ -244,5 +245,5 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_SHELL_REPO` | 壳自更新的 GitHub 仓库（默认 `MoonlitDropOfBlood/DSH-Desktop`） |
 | `DSH_DESKTOP_NODE` | 覆盖要 spawn 的 node 可执行文件绝对路径（默认内置 node，其次系统） |
 | `DSH_DESKTOP_NPM` | 覆盖要 spawn 的 npm 可执行文件绝对路径（仅非内置回退时用） |
-| `DSH_DESKTOP_NODE_VERSION` | `scripts/fetch-node.js` 下载的 node 版本（默认 22.14.0） |
+| `DSH_DESKTOP_NODE_VERSION` | `scripts/fetch-node.js` 下载的 node 版本（默认 24.19.0 LTS） |
 | `DSH_DESKTOP_NODE_MIRROR` | 内置 node 下载镜像（默认 npmmirror，回退 nodejs.org） |

@@ -9,11 +9,12 @@
  *
  * Usage:
  *   node scripts/fetch-node.js [os] [arch]
- *     os   — win | mac | linux   (default: current platform)
- *     arch — x64 | ia32 | arm64  (default: current arch)
+ *     os   — win | mac | linux  (default: current platform)
+ *     arch — x64 | arm64       (default: current arch; official Node ≥23
+ *                              no longer publishes win-x86, so no ia32)
  *
  * Env:
- *   DSH_DESKTOP_NODE_VERSION — node version to fetch (default: 22.14.0)
+ *   DSH_DESKTOP_NODE_VERSION — node version to fetch (default: 24.19.0, LTS)
  *   DSH_DESKTOP_NODE_MIRROR  — mirror base URL (default: npmmirror, falls back
  *                              to nodejs.org)
  *
@@ -29,7 +30,10 @@ const os = require("os");
 const path = require("path");
 const { execFileSync, spawnSync } = require("child_process");
 
-const VERSION = process.env.DSH_DESKTOP_NODE_VERSION || "22.14.0";
+// Node 24 LTS. DSH core needs the node:zlib zstd APIs (>= 22.15.0) — 22.14.0
+// shipped in shell 1.2.0 crashed DSH at startup with "does not provide an
+// export named 'createZstdDecompress'". Keep this at the latest LTS.
+const VERSION = process.env.DSH_DESKTOP_NODE_VERSION || "24.19.0";
 const MIRRORS = [
   process.env.DSH_DESKTOP_NODE_MIRROR,
   "https://npmmirror.com/mirrors/node",
@@ -40,7 +44,6 @@ const PLATFORM_OS = { win32: "win", darwin: "mac", linux: "linux" };
 /** electron-builder os/arch key → nodejs.org dist arch name. */
 const DIST_NAMES = {
   "win-x64": "win-x64",
-  "win-ia32": "win-x86",
   "mac-x64": "darwin-x64",
   "mac-arm64": "darwin-arm64",
   "linux-x64": "linux-x64"
@@ -102,19 +105,23 @@ function main() {
     ? path.join(outDir, "node.exe")
     : path.join(outDir, "bin", "node");
 
-  // Idempotent: if the right node is already in place, skip. Only run
-  // `--version` when the binary is native to this host; otherwise existence is
-  // enough (a Windows box staging the linux bundle cannot execute it).
+  // Idempotent: if the right node is already in place, skip. When the binary
+  // is native to this host, verify the version MATCHES the target — a stale
+  // older cache (e.g. left over from a previous default version) must not be
+  // silently bundled. Cross-host staging can only check existence.
   if (fs.existsSync(nodeBin)) {
     const native = PLATFORM_OS[process.platform] === osArg;
-    try {
-      if (native) {
-        const v = execFileSync(nodeBin, ["--version"], { encoding: "utf8" }).trim();
-        log(`${key}: node ${v} already present — skipping`);
-      } else {
-        log(`${key}: node already present — skipping`);
-      }
+    if (!native) {
+      log(`${key}: node already present — skipping (cross-host, version unverified)`);
       return;
+    }
+    try {
+      const v = execFileSync(nodeBin, ["--version"], { encoding: "utf8" }).trim();
+      if (v === `v${VERSION}`) {
+        log(`${key}: node ${v} already present — skipping`);
+        return;
+      }
+      log(`${key}: node ${v} present but v${VERSION} wanted — refetching`);
     } catch {
       log(`${key}: stale node binary, refetching`);
     }
