@@ -8,11 +8,14 @@
  * bridge (`window.dshDesktop`) and built from the DSH standard UI primitives
  * (`@deepseek-ai/dsh-client-ui-primitives` Button / Toast):
  *   1. Window controls (min / max / close) — a top strip (`shell.overlay`)
- *      that starts where the sidebar ends, drags the frameless window on its
- *      left and holds the buttons on its right. The DSH header's "Session log"
- *      button is re-hosted here (next to minimize; the original is hidden via
- *      CSS), so the session header keeps its natural layout and the sidebar
- *      stays flush to the top.
+ *      that starts where the sidebar ends and holds the buttons on its right.
+ *      The frameless window is dragged by two THIN drag strips whose heights
+ *      are measured live so they only cover empty padding: one along the top
+ *      edge above the session header, one above the sidebar's brand/buttons.
+ *      The DSH header's "Session log" button is re-hosted here (next to
+ *      minimize; the original is hidden via CSS), so the session header keeps
+ *      its natural layout and the sidebar stays flush to the top. All colors
+ *      come from DSH theme tokens, so the controls track the light/dark theme.
  *   2. A settings section ("核心") showing the installed core version, a
  *      "check for updates" button, and an auto-update toggle. Feedback is shown
  *      via a Toast ("已是最新版本" / "发现新版本 …").
@@ -59,6 +62,43 @@ window.__ModuleLoader__.load({
 		}
 
 		// ---- 1. frameless window controls (top-right, immersive) ----------------
+		// Drag-strip vertical clearance, in px. The strips are only as tall as the
+		// empty padding above the first VISIBLE interactive element below them
+		// (measured live), so they never swallow clicks meant for the session
+		// header or the sidebar brand — on macOS a drag region eats clicks whole.
+		// The fallback matches the DSH session header's top padding (12px). The
+		// main strip gets a tighter cap than the sidebar strip: if a header ever
+		// renders its first real button low (e.g. only the tab row is
+		// interactive), the strip must still not reach into the title row.
+		const DRAG_STRIP_FALLBACK = 12;
+		const DRAG_STRIP_MIN = 6;
+		const DRAG_STRIP_MAX = 28;      // sidebar strip (clearance above the brand row)
+		const DRAG_STRIP_MAX_MAIN = 16; // session-header strip
+		/**
+		 * Height of the empty strip at the top of a region: how far its first
+		 * VISIBLE interactive element sits below the window top, minus a small
+		 * gap. Hidden elements (display:none report an all-zero rect) are
+		 * skipped; the fallback applies when none is found. Clamped so a
+		 * mis-measure can neither make the strip unhittable nor let it cover
+		 * real content.
+		 */
+		function topClearance(scope, max) {
+			const cap = max === undefined ? DRAG_STRIP_MAX : max;
+			if (!scope || typeof scope.querySelectorAll !== "function") return DRAG_STRIP_FALLBACK;
+			try {
+				const els = scope.querySelectorAll("button, a[href], [role=\"button\"], input, textarea, select, [contenteditable]");
+				for (const el of els) {
+					const r = el.getBoundingClientRect();
+					if (r.width === 0 && r.height === 0) continue; // hidden
+					if (!isFinite(r.top)) return DRAG_STRIP_FALLBACK;
+					return Math.max(DRAG_STRIP_MIN, Math.min(cap, Math.round(r.top) - 2));
+				}
+				return DRAG_STRIP_FALLBACK;
+			} catch (e) {
+				return DRAG_STRIP_FALLBACK;
+			}
+		}
+
 		function WindowBtn(props) {
 			return React.createElement(
 				"button",
@@ -178,8 +218,12 @@ window.__ModuleLoader__.load({
 				// The control strip starts where the SIDEBAR ends (never over it —
 				// the sidebar's brand/toggle must stay clickable) and its drag
 				// region ends where the buttons begin (the Session log capsule is
-				// variable-width, so measure instead of hard-coding). Keep both in
-				// sync as the sidebar resizes / collapses or the window resizes.
+				// variable-width, so measure instead of hard-coding). Both drag
+				// strips are only as TALL as the empty clearance above the first
+				// interactive element below them (topClearance), so a DSH update
+				// that shifts header/sidebar padding cannot make a drag strip
+				// cover clickable content again. Keep everything in sync as the
+				// sidebar resizes / collapses or the window resizes.
 				const overlay = document.querySelector("[data-shell-overlay]");
 				const frame = overlay ? overlay.parentElement : null;
 				const sidebar = frame ? frame.firstElementChild : null;
@@ -194,6 +238,16 @@ window.__ModuleLoader__.load({
 							if (r.width > 0 && (firstBtnLeft === null || r.left < firstBtnLeft)) firstBtnLeft = r.left;
 						}
 						drag.style.right = (firstBtnLeft === null ? 0 : Math.max(0, window.innerWidth - firstBtnLeft)) + "px";
+						drag.style.height = topClearance(document.querySelector('[data-slot="conversation.session.header"]'), DRAG_STRIP_MAX_MAIN) + "px";
+					}
+					// Sidebar drag strip: covers the empty area ABOVE the sidebar's
+					// brand/logo row (the window is frameless — on macOS there is no
+					// native title bar to grab anywhere). It extends leftwards out
+					// of the strip (right:100%) across the sidebar's full width.
+					const dragSide = host.querySelector(".dsh-desktop-drag-side");
+					if (dragSide) {
+						dragSide.style.width = left + "px";
+						dragSide.style.height = (left > 0 && sidebar ? topClearance(sidebar) : 0) + "px";
 					}
 				};
 				sync();
@@ -218,16 +272,21 @@ window.__ModuleLoader__.load({
 				};
 			}, []);
 			if (!hasBridge("windowControl")) return null;
-			// A 36px-tall strip along the top of the frame: its left part is the
-			// window drag handle (fixes "can't drag the frameless window" — the old
-			// drag area was only an 18px sliver). The right end holds, in order:
-			// the re-hosted Session log capsule, minimize, maximize, close. The
+			// A 36px-tall strip along the top of the frame whose CONTAINER is
+			// pointer-events:none — it never swallows clicks meant for the session
+			// header below; only the actual controls re-enable hit-testing. The
+			// window drag handle is a THIN sibling strip at the very top edge
+			// (height measured live to end just above the header's content), plus
+			// a second strip covering the empty area above the sidebar's
+			// brand/buttons. The right end of the strip holds, in order: the
+			// re-hosted Session log capsule, minimize, maximize, close. The
 			// SIDEBAR stays flush to the top and untouched; the session header is
-			// left in its natural layout (the original Session log button is hidden
-			// via CSS).
+			// left in its natural layout (the original Session log button is
+			// hidden via CSS).
 			return React.createElement(
 				"div",
 				{ ref: controlsRef, className: "dsh-desktop-controls", role: "group", "aria-label": "窗口控制" },
+				React.createElement("div", { className: "dsh-desktop-drag-side" }),
 				React.createElement("div", { className: "dsh-desktop-drag" }),
 				React.createElement(SessionLogButton, { sessions: props && props.sessions }),
 				React.createElement(WindowBtn, { kind: "minimize", title: "最小化" }),
@@ -361,6 +420,7 @@ window.__ModuleLoader__.load({
 			const preventSleep = state ? !!state.preventSleep : false;
 			const taskNotify = state ? !!state.taskNotify : false;
 			const inheritTerminalProfile = state ? state.inheritTerminalProfile !== false : true;
+			const bundleMarket = state ? state.bundleMarket !== false : true;
 
 			// Shell self-update progress pushes from the main process.
 			React.useEffect(() => {
@@ -415,6 +475,10 @@ window.__ModuleLoader__.load({
 			const toggleTerminalProfile = () => {
 				bridge().setInheritTerminalProfile(!inheritTerminalProfile);
 				setToast({ text: !inheritTerminalProfile ? "已开启：将继承终端 Profile（需重启 DSH 生效）" : "已关闭：不再继承终端 Profile（需重启 DSH 生效）" });
+			};
+			const toggleMarket = () => {
+				bridge().setBundleMarket(!bundleMarket);
+				setToast({ text: !bundleMarket ? "已开启：下次启动 DSH 时挂载内置插件市场" : "已关闭：下次启动 DSH 起不再挂载内置插件市场" });
 			};
 
 			const shellVersion = (state && state.shellVersion) || "未知";
@@ -472,6 +536,13 @@ window.__ModuleLoader__.load({
 						React.createElement("span", null, inheritTerminalProfile ? "已开启" : "已关闭"))),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"继承终端 Profile：自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，建议保持开启（改动需重启 DSH 生效）。"),
+				React.createElement("div", { className: "dsh-desktop-row" },
+					React.createElement("span", { className: "dsh-desktop-label" }, "插件市场"),
+					React.createElement("label", { className: "dsh-desktop-toggle" },
+						React.createElement("input", { type: "checkbox", checked: bundleMarket, onChange: toggleMarket }),
+						React.createElement("span", null, bundleMarket ? "已开启" : "已关闭"))),
+				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
+					"内置插件市场（dshmarket）：随壳自带、免下载安装，可浏览/搜索/一键安装社区插件。若你已在 DSH profile 中自行安装过插件市场，以你的安装为准（不会重复挂载）；改动需重启 DSH 生效。"),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"任务通知：主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）。")
 			);
@@ -482,50 +553,79 @@ window.__ModuleLoader__.load({
    where the sidebar ends (left is measured via JS in WindowControls so it never
    covers the sidebar — its brand/toggle stay clickable and it stays flush to the
    top) and its drag region ends where the buttons begin (right is also measured,
-   because the Session log capsule is variable-width). Everything left of the
-   buttons is the drag region — grab anywhere along the top of the center/detail
-   columns to move the window (previously the drag area was an 18px sliver, so
-   the frameless window could not be dragged at all, most noticeably on macOS).
-   Drag handling lives on a DEDICATED sibling strip (never nested in the same
+   because the Session log capsule is variable-width).
+
+   Click-through: the CONTAINER is pointer-events:none, so the strip never
+   swallows clicks meant for the session header/sidebar below; only the real
+   controls (buttons, capsule, drag strips) re-enable hit-testing. The drag
+   strips are THIN: their height is measured live in WindowControls as the empty
+   clearance above the first interactive element below them (the session
+   header's top padding, resp. the space above the sidebar's brand/buttons), so
+   the macOS drag region can no longer cover the title bar and eat its clicks —
+   the earlier full-height 36px drag strip did exactly that. Grab the top edge of
+   any column (sidebar included) to move the frameless window.
+
+   Drag handling lives on DEDICATED sibling strips (never nested in the same
    element as the buttons): on macOS, -webkit-app-region: drag on an ancestor can
    swallow clicks from no-drag children, making the buttons dead. The container
    itself carries no app-region; buttons are no-drag + explicit
-   pointer-events:auto. */
+   pointer-events:auto. Colors come from DSH theme tokens (--dsw-alias-*), which
+   flip with the light/dark theme — hard-coded dark-theme colors used to make the
+   controls washed out / invisible on hover in light mode. */
 .dsh-desktop-controls {
   position: fixed; top: 0; left: 0; right: 0; height: 36px;
   display: flex; align-items: stretch; justify-content: flex-end;
-  z-index: 2147483000; pointer-events: auto; user-select: none;
+  z-index: 2147483000; pointer-events: none; user-select: none;
 }
 .dsh-desktop-controls .dsh-desktop-drag {
-  position: absolute; top: 0; bottom: 0; left: 0; right: 132px;
-  -webkit-app-region: drag;
+  position: absolute; top: 0; left: 0; right: 132px; height: 12px;
+  -webkit-app-region: drag; pointer-events: auto;
+}
+/* Sidebar drag strip: extends leftwards out of the strip (right:100%) across
+   the sidebar's full width; JS sets width = sidebar width and height = the
+   clearance above the sidebar's first button. */
+.dsh-desktop-controls .dsh-desktop-drag-side {
+  position: absolute; top: 0; right: 100%; width: 0; height: 12px;
+  -webkit-app-region: drag; pointer-events: auto;
 }
 .dsh-desktop-controls .dsh-desktop-btn {
   -webkit-app-region: no-drag; pointer-events: auto; width: 44px;
   box-sizing: border-box; height: 22px; margin: 9px 0 5px 0;
   border: none; background: transparent;
-  color: #9aa5b8; font-size: 14px; line-height: 1;
+  color: var(--dsw-alias-label-secondary, #61666b); font-size: 14px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer; transition: background 0.12s, color 0.12s;
 }
-.dsh-desktop-controls .dsh-desktop-btn:hover { background: rgba(255,255,255,0.08); color: #e5e9f2; }
+.dsh-desktop-controls .dsh-desktop-btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--dsw-alias-label-primary, #0f1115);
+}
 .dsh-desktop-controls .dsh-desktop-btn.is-close:hover { background: #e81123; color: #fff; }
 
 /* Session log, re-hosted here (the DSH header's own button is hidden below).
-   A compact labeled capsule that reads like the original DSH button. All the
-   controls (capsule + window buttons) are inset 9px from the top of the strip
-   so they no longer hug the window's top edge. */
+   A compact labeled capsule that reads like the original DSH button and uses
+   the same theme tokens as dsh-session-log-export's HeaderAction
+   (label-primary text, border-l2 outline, interactive-bg-hover on hover), so
+   it tracks the light/dark theme. All the controls (capsule + window buttons)
+   are inset 9px from the top of the strip so they don't hug the window's top
+   edge. */
 .dsh-desktop-controls .dsh-desktop-sessionlog {
   -webkit-app-region: no-drag; pointer-events: auto;
-  display: inline-flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   box-sizing: border-box; height: 22px; margin: 9px 10px 5px 12px; padding: 0 10px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.14));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
   border-radius: 13px; background: transparent;
-  color: #9aa5b8; font-size: 12px; line-height: 1; white-space: nowrap;
+  color: var(--dsw-alias-label-primary, #0f1115);
+  font-family: var(--dsw-font-family, inherit);
+  font-size: 12px; line-height: 1; white-space: nowrap;
   cursor: pointer; transition: background 0.12s, color 0.12s;
 }
-.dsh-desktop-controls .dsh-desktop-sessionlog:hover { background: rgba(255,255,255,0.08); color: #e5e9f2; }
-.dsh-desktop-controls .dsh-desktop-sessionlog:disabled { opacity: 0.55; cursor: wait; }
+.dsh-desktop-controls .dsh-desktop-sessionlog:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
+}
+.dsh-desktop-controls .dsh-desktop-sessionlog:disabled {
+  color: var(--dsw-alias-label-dimmed, #c3c6cc); cursor: wait;
+}
 
 /* The DSH header's original Session log button is replaced by the one above —
    hide it so the session header keeps its natural (uncolliding) layout. This

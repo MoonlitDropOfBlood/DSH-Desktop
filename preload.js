@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   setPreventSleep: (value) => ipcRenderer.invoke("dsh:setPreventSleep", value),
   setTaskNotify: (value) => ipcRenderer.invoke("dsh:setTaskNotify", value),
   setInheritTerminalProfile: (value) => ipcRenderer.invoke("dsh:setInheritTerminalProfile", value),
+  setBundleMarket: (value) => ipcRenderer.invoke("dsh:setBundleMarket", value),
   installUpdate: () => ipcRenderer.invoke("dsh:installUpdate"),
   restartApp: () => ipcRenderer.invoke("dsh:restartApp"),
   // shell (desktop app) self-update via GitHub releases

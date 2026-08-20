@@ -7,5 +7,6 @@ release/
 .fresh-home/
 build/node/
 build/.node-tmp-*/
+build/market-plugin/
 *.log
 *.tgz

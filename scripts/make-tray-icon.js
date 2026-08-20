@@ -9,8 +9,8 @@
  *
  * Writes:
  *   build/tray-icon.png              —  64px, Windows/Linux system tray (main.js)
- *   build/tray-iconTemplate.png      —  16px, macOS menu-bar template (black+alpha)
- *   build/tray-iconTemplate@2x.png   —  32px, macOS retina (@2x) representation
+ *   build/tray-iconTemplate.png      —  22×16pt, macOS menu-bar template (black+alpha)
+ *   build/tray-iconTemplate@2x.png   —  44×32px, macOS retina (@2x) representation
  *   build/icon.png                   — 256px, Windows window/taskbar + shortcut base
  *   build/icon-512.png               — 512px, macOS / Linux (electron-builder converts to
  *                                       icns / uses directly for AppImage)
@@ -47,17 +47,24 @@ function buildIconSvg(size, whalePath) {
  * macOS menu-bar icons must be small "template" images: pure black + alpha, no
  * background tile, no color. The system recolors them for light/dark menu bars
  * and renders them at their native point size — a full-color 64px tile shows up
- * far too large. The whale alone fills ~80% of the canvas.
+ * far too large.
+ *
+ * Sizing: the whale is much wider than tall (viewBox ≈ 1.36:1), so fitting it
+ * by WIDTH inside a square canvas left ~40% empty vertical padding and the
+ * menu-bar glyph looked about half the size of its neighbours. Instead the
+ * canvas is a WIDE tile (22×16pt — wide menu-bar icons are normal, cf. the
+ * battery glyph) and the whale is fitted by HEIGHT at 87.5%, giving a 14pt
+ * visible glyph height, in line with standard menu-bar icons.
  */
-function buildTemplateSvg(size, whalePath) {
+function buildTemplateSvg(width, height, whalePath) {
   const vbW = 23.16;
   const vbH = 17.04;
-  const scale = (size * 0.8) / vbW; // fit by width
+  const scale = (height * 0.875) / vbH; // fit by height
   const w = vbW * scale;
   const h = vbH * scale;
-  const x = (size - w) / 2;
-  const y = (size - h) / 2;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  const x = (width - w) / 2;
+  const y = (height - h) / 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <g transform="translate(${x.toFixed(3)} ${y.toFixed(3)}) scale(${scale.toFixed(5)})">
     <path d="${whalePath}" fill="#000000"/>
   </g>
@@ -79,17 +86,21 @@ function main() {
 
   const jobs = [
     { size: 64, file: "tray-icon.png" },
-    { size: 16, file: "tray-iconTemplate.png", template: true },
-    { size: 32, file: "tray-iconTemplate@2x.png", template: true },
+    { width: 22, height: 16, file: "tray-iconTemplate.png", template: true },
+    { width: 44, height: 32, file: "tray-iconTemplate@2x.png", template: true },
     { size: 256, file: "icon.png" },
     { size: 512, file: "icon-512.png" }
   ];
   for (const job of jobs) {
-    const svg = job.template ? buildTemplateSvg(job.size, whalePath) : buildIconSvg(job.size, whalePath);
-    const png = renderPng(svg, job.size);
+    const svg = job.template
+      ? buildTemplateSvg(job.width, job.height, whalePath)
+      : buildIconSvg(job.size, whalePath);
+    const width = job.template ? job.width : job.size;
+    const png = renderPng(svg, width);
     const out = path.join(outDir, job.file);
     fs.writeFileSync(out, png);
-    console.log(`wrote ${out} (${png.length} bytes, ${job.size}x${job.size}${job.template ? ", template" : ""})`);
+    const dims = job.template ? `${job.width}x${job.height}` : `${job.size}x${job.size}`;
+    console.log(`wrote ${out} (${png.length} bytes, ${dims}${job.template ? ", template" : ""})`);
   }
 }
 

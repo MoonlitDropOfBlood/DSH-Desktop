@@ -8,6 +8,41 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-20
+
+### 新增
+
+- **内置插件市场（dshmarket，开箱即用）**：桌面壳自带 [dsh-market](https://github.com/dsh-market/dsh-market)
+  插件市场（当前 pin 1.15.0），无需用户手动安装即可浏览/搜索/一键安装社区插件。
+  构建期由 `scripts/fetch-market-plugin.js`（`npm run fetch:market`，已接入各 `dist:*`
+  脚本与 CI）把插件及其运行时闭包（js-yaml/undici/argparse）装进
+  `build/market-plugin/`；启动时 `stageBundledMarket()` 把它暂存进 web profile 的
+  `node_modules` 并经 `--patch` 覆盖层挂载。**若用户已在 profile 里自行安装过插件市场，
+  以用户的安装为准、不重复挂载**（Cordis `- insert:` 是无条件追加，同 id 再插一行会把
+  插件挂载两次）。桌面版设置新增「插件市场」开关（默认开，改动需重启 DSH 生效）——
+  用户在 profile 里卸载市场后可凭此开关避免壳再次自动装回。内置挂载以
+  `allowRestart: false` 挂载：DSH 进程生命周期归 Electron 壳管，插件自带的重启会绕过壳、
+  被误判为崩溃。
+
+### 修复
+
+- **窗口控制条/Session log 胶囊在浅色模式下显示异常**：控制条按钮与重做的 Session log
+  胶囊此前硬编码深色主题颜色（`#9aa5b8` 文字、白色半透明 hover 背景），浅色模式下文字
+  发灰、hover 近乎不可见。全部改用 DSH 主题 token（`--dsw-alias-label-primary/secondary`、
+  `--dsw-alias-border-l2`、`--dsw-alias-interactive-bg-hover` 等，与
+  `dsh-session-log-export` 原版按钮一致），随明暗主题自动切换；主进程兜底控制条同步更新。
+- **macOS 拖拽区盖住会话标题栏、侧栏顶部无法拖动窗口**：拖拽区原本是整条 36px 高的顶部条
+  且容器 `pointer-events:auto`，盖住会话头部（其 `padding-top` 仅 12px），macOS 上拖拽区
+  会整个吃掉点击，标题栏操作难以点中。现在：控制条容器改为 `pointer-events:none`（透明区
+  不再吞点击）；拖拽条改为**细条**，高度由 `topClearance()` 运行时测量——恰好只覆盖会话头部
+  顶部留白（兜底 12px，主拖拽条 clamp 6–16px、侧栏 6–28px）；另新增 `.dsh-desktop-drag-side`
+  拖拽条铺满侧栏顶部（logo/按钮上方的留白，高度同样运行时测量），侧栏上方也能拖动窗口。
+  兜底控制条同步改为细拖拽条方案。
+- **macOS 托盘图标比正常菜单栏图标小约一半**：模板图曾在 16×16 方画布上按鲸鱼**宽度**
+  80% 适配，鲸鱼宽高比 ≈1.36:1 导致可见高度只有画布的 59%（垂直边距约 40%）。改为
+  **22×16pt 宽画布**（菜单栏宽图标是常规形态，如电池）+ 按**高度** 87.5% 适配，可见高度
+  14pt，与标准菜单栏图标一致；@2x 相应为 44×32px。
+
 ## [1.2.0] - 2026-08-19
 
 ### 新增

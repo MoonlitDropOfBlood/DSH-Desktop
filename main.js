@@ -306,12 +306,18 @@ function ensureFallbackControls() {
       if (document.documentElement) document.documentElement.setAttribute('data-dsh-desktop', 'true');
       var css = document.createElement('style');
       css.textContent = [
-        // Top strip starting where the sidebar ends, drag on the left, buttons
-        // at the right — same layout as the plugin's own controls.
-        '.dsh-desktop-fallback{position:fixed;top:0;left:0;right:0;height:36px;display:flex;align-items:stretch;justify-content:flex-end;z-index:2147483000;user-select:none}',
-        '.dsh-desktop-fallback .dsh-desktop-fallback-drag{position:absolute;top:0;bottom:0;left:0;right:132px;-webkit-app-region:drag}',
-        '.dsh-desktop-fallback .fb{width:44px;box-sizing:border-box;height:22px;margin:9px 0 5px 0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#9aa5b8;font-size:14px;border:none;background:transparent;-webkit-app-region:no-drag;pointer-events:auto}',
-        '.dsh-desktop-fallback .fb:hover{background:rgba(255,255,255,0.08);color:#e5e9f2}',
+        // Top strip starting where the sidebar ends, buttons at the right —
+        // same layout as the plugin's own controls. The container is
+        // pointer-events:none so it never swallows session-header clicks; the
+        // drag handle is a THIN 12px strip at the very top edge (a full-height
+        // drag strip used to cover the header and eat its clicks on macOS),
+        // plus a second strip over the empty area above the sidebar's
+        // brand/buttons. Colors use DSH theme tokens so they track light/dark.
+        '.dsh-desktop-fallback{position:fixed;top:0;left:0;right:0;height:36px;display:flex;align-items:stretch;justify-content:flex-end;z-index:2147483000;user-select:none;pointer-events:none}',
+        '.dsh-desktop-fallback .dsh-desktop-fallback-drag{position:absolute;top:0;left:0;right:132px;height:12px;-webkit-app-region:drag;pointer-events:auto}',
+        '.dsh-desktop-fallback .dsh-desktop-fallback-drag-side{position:absolute;top:0;right:100%;width:0;height:12px;-webkit-app-region:drag;pointer-events:auto}',
+        '.dsh-desktop-fallback .fb{width:44px;box-sizing:border-box;height:22px;margin:9px 0 5px 0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dsw-alias-label-secondary,#61666b);font-size:14px;border:none;background:transparent;-webkit-app-region:no-drag;pointer-events:auto}',
+        '.dsh-desktop-fallback .fb:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,0.06));color:var(--dsw-alias-label-primary,#0f1115)}',
         '.dsh-desktop-fallback .fb-close:hover{background:#e81123;color:#fff}',
         // Hide the DSH header's Session log button so the strip never covers it
         // (matches the plugin: the strip holds its own re-hosted button). The
@@ -322,6 +328,7 @@ function ensureFallbackControls() {
       var strip = document.createElement('div');
       strip.className = 'dsh-desktop-fallback';
       strip.innerHTML =
+        '<div class="dsh-desktop-fallback-drag-side"></div>' +
         '<div class="dsh-desktop-fallback-drag"></div>' +
         '<button class="fb" data-a="minimize" title="最小化">\u2013</button>' +
         '<button class="fb" data-a="toggleMaximize" title="最大化/还原">\u25A1</button>' +
@@ -340,7 +347,10 @@ function ensureFallbackControls() {
         var overlay = document.querySelector('[data-shell-overlay]');
         var frame = overlay && overlay.parentElement;
         var sidebar = frame && frame.firstElementChild;
-        strip.style.left = (sidebar ? Math.round(sidebar.getBoundingClientRect().right) : 0) + 'px';
+        var left = sidebar ? Math.round(sidebar.getBoundingClientRect().right) : 0;
+        strip.style.left = left + 'px';
+        var dragSide = strip.querySelector('.dsh-desktop-fallback-drag-side');
+        if (dragSide) dragSide.style.width = left + 'px';
       }
       syncLeft();
       window.addEventListener('resize', syncLeft);
@@ -755,6 +765,87 @@ function dshHomeDir() {
  *
  * @returns the absolute patch file path, or null on failure.
  */
+// ---- bundled plugin market (dshmarket) --------------------------------------
+/**
+ * The shell ships a pinned copy of the dshmarket plugin (the visual plugin
+ * market) so every install has it out of the box — no npm download at first
+ * run. scripts/fetch-market-plugin.js installs the pinned version into
+ * build/market-plugin/node_modules at build time (packed via `files`); here we
+ * STAGE the packages into the DSH web profile and mount the plugin through our
+ * --patch overlay.
+ *
+ * Only the market's own runtime packages are staged (dshmarket + js-yaml +
+ * undici + argparse): every @deepseek-ai/* import (dsh-settings, schemastery,
+ * client injects) resolves against the DSH core install — a profile-installed
+ * copy does not bring those into the profile either (verified against a real
+ * pnpm-managed profile: its lockfile lists only js-yaml + undici + argparse).
+ */
+function majorOf(v) { const m = String(v || "").match(/\d+/); return m ? m[0] : null; }
+
+/**
+ * Copy one staged package into the profile. mode "always" overwrites (the
+ * desktop owns the dshmarket copy); mode "compatible" only fills in when the
+ * package is missing or the existing copy's major version differs — the
+ * profile's node_modules can be pnpm-managed, so never clobber a compatible
+ * copy another plugin may rely on.
+ */
+function stagePackage(srcDir, name, dstDir, mode) {
+  const src = path.join(srcDir, name);
+  const dst = path.join(dstDir, name);
+  if (!fs.existsSync(src)) return;
+  if (mode !== "always" && fs.existsSync(dst)) {
+    try {
+      const sv = majorOf(JSON.parse(fs.readFileSync(path.join(src, "package.json"), "utf8")).version);
+      const dv = majorOf(JSON.parse(fs.readFileSync(path.join(dst, "package.json"), "utf8")).version);
+      if (sv && dv && sv === dv) return; // compatible copy already present
+    } catch { /* unreadable — refresh it below */ }
+  }
+  fs.rmSync(dst, { recursive: true, force: true });
+  fs.cpSync(src, dst, { recursive: true });
+}
+
+/**
+ * Stage the bundled market into the web profile and decide whether to mount
+ * it. Returns true when the desktop should add the dsh-market row to the
+ * --patch overlay; false when the feature is switched off, the bundle is
+ * missing, or the profile ALREADY mounts the market itself — the user's own
+ * copy then wins, because Cordis `- insert:` appends unconditionally and a
+ * second row with the same id would mount the plugin TWICE.
+ */
+function stageBundledMarket() {
+  if (readSettings().bundleMarket === false) {
+    log("bundled market: disabled in settings — skipped");
+    return false;
+  }
+  const srcDir = path.join(__dirname, "build", "market-plugin", "node_modules");
+  if (!fs.existsSync(path.join(srcDir, "dshmarket", "package.json"))) {
+    log("bundled market: build/market-plugin not found (run `npm run fetch:market`) — skipped");
+    return false;
+  }
+  const profileDir = path.join(dshHomeDir(), "profiles", "web");
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(profileDir, "package.json"), "utf8"));
+    const bundles = (((pkg || {}).dsh || {}).profile || {}).bundles;
+    if (Array.isArray(bundles) && bundles.includes("dshmarket")) {
+      log("bundled market: profile already bundles dshmarket — user's own copy wins");
+      return false;
+    }
+  } catch { /* no profile package.json yet → not user-mounted */ }
+  try {
+    const patchText = fs.readFileSync(path.join(profileDir, "cordis.patch.yml"), "utf8");
+    if (patchText.includes("dshmarket")) {
+      log("bundled market: profile cordis.patch.yml already mounts dshmarket — user's own copy wins");
+      return false;
+    }
+  } catch { /* no patch file → not user-mounted */ }
+  const dstDir = path.join(profileDir, "node_modules");
+  fs.mkdirSync(dstDir, { recursive: true });
+  stagePackage(srcDir, "dshmarket", dstDir, "always");
+  for (const dep of ["js-yaml", "undici", "argparse"]) stagePackage(srcDir, dep, dstDir, "compatible");
+  log(`bundled market staged into ${dstDir}`);
+  return true;
+}
+
 function prepareDesktopPlugin() {
   try {
     const srcDir = path.join(__dirname, "dsh-desktop-plugin");
@@ -765,12 +856,23 @@ function prepareDesktopPlugin() {
       fs.copyFileSync(path.join(srcDir, file), path.join(targetDir, file));
     }
     const patchPath = path.join(app.getPath("userData"), "desktop-plugin.patch.yml");
-    const patch =
+    let patch =
       "# Generated by DeepSeek Harness Desktop. Mounts the frameless-window\n" +
-      "# controls client plugin into the DSH web UI.\n" +
+      "# controls client plugin (and the built-in plugin market) into the DSH web UI.\n" +
       "- insert:\n" +
       "  - id: dsh-desktop-plugin\n" +
       "    name: 'dsh-desktop-plugin'\n";
+    if (stageBundledMarket()) {
+      patch +=
+        "# Built-in plugin market (dshmarket), staged into the profile by the shell.\n" +
+        "- insert:\n" +
+        "  - id: dsh-market\n" +
+        "    name: 'dshmarket'\n" +
+        "    config:\n" +
+        "      # The Electron shell owns the DSH process lifecycle; the market's\n" +
+        "      # own restart would spawn a rogue core and look like a crash here.\n" +
+        "      allowRestart: false\n";
+    }
     fs.writeFileSync(patchPath, patch, "utf8");
     log(`desktop plugin staged at ${targetDir}`);
     return patchPath;
@@ -1115,10 +1217,11 @@ function readSettings() {
       preventSleep: json.preventSleep === true,
       taskNotify: json.taskNotify === true,
       inheritTerminalProfile: json.inheritTerminalProfile !== false, // default ON
+      bundleMarket: json.bundleMarket !== false, // default ON
       port: /^\d+$/.test(String(json.port)) ? Number(json.port) : undefined
     };
   } catch {
-    return { autoUpdate: false, closeToTray: false, preventSleep: false, taskNotify: false, inheritTerminalProfile: true, port: undefined };
+    return { autoUpdate: false, closeToTray: false, preventSleep: false, taskNotify: false, inheritTerminalProfile: true, bundleMarket: true, port: undefined };
   }
 }
 
@@ -1351,6 +1454,7 @@ function pushUpdateState() {
     preventSleep: settings.preventSleep,
     taskNotify: settings.taskNotify,
     inheritTerminalProfile: settings.inheritTerminalProfile,
+    bundleMarket: settings.bundleMarket,
     updateAvailable: Boolean(installed && latestKnown && latestKnown !== installed)
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1816,6 +1920,12 @@ ipcMain.handle("dsh:setTaskNotify", (_e, value) => {
 ipcMain.handle("dsh:setInheritTerminalProfile", (_e, value) => {
   writeSettings({ inheritTerminalProfile: value !== false });
   _terminalEnv = null; // re-evaluate on the next DSH spawn/restart
+  return pushUpdateState();
+});
+ipcMain.handle("dsh:setBundleMarket", (_e, value) => {
+  // Takes effect on the next DSH (re)start — the --patch overlay (and the
+  // staged profile copy) is composed per spawn, never hot-swapped.
+  writeSettings({ bundleMarket: value !== false });
   return pushUpdateState();
 });
 

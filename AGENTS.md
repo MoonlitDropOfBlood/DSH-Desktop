@@ -26,9 +26,11 @@ dsh-desktop/
 ├── scripts/
 │   ├── make-tray-icon.js   # 用 @resvg/resvg-js 从 whale.svg 生成各尺寸图标
 │   ├── fetch-node.js       # 下载官方 Node 发行版（含 npm）到 build/node/<os>-<arch>/
+│   ├── fetch-market-plugin.js # 下载内置插件市场 dshmarket 到 build/market-plugin/
 │   └── embed-exe-icon.js   # 本机无法解压 winCodeSign 时，用 rcedit 手动嵌 exe 图标
 └── build/
     ├── node/               # 内置 Node（gitignore；打包时经 extraResources 随 app 分发）
+    ├── market-plugin/      # 内置插件市场（gitignore；打包时经 files 随 app 分发）
     ├── whale.svg           # DeepSeek 鲸鱼矢量源（从 DSH FishLogo 提取）
     ├── icon.png            # 256px（Windows）
     ├── icon-512.png        # 512px（macOS / Linux）
@@ -99,6 +101,18 @@ window.__ModuleLoader__.load({
 - `package.json` 必须 `exports` 里包含 `"./package.json"`，否则 `require.resolve("<pkg>/package.json")` 失败（exports 字段会封锁子路径）。
 - `ctx.slots` 直接访问需要 `exports.inject = ["slots"]`，否则 "cannot get property slots without inject"。
 
+### 2b. 内置插件市场（dshmarket，`stageBundledMarket`）
+
+壳自带 [dsh-market](https://github.com/dsh-market/dsh-market) 插件市场（pin 版本，`DSH_DESKTOP_MARKET_VERSION` 覆盖），开箱即用、目标机器零下载：
+
+- **构建期**：`scripts/fetch-market-plugin.js`（`npm run fetch:market`，已接入所有 `dist:*` 脚本和 CI 各 job）用 `npm install --prefix build/market-plugin --no-save --omit=dev dshmarket@<pin>` 拉取插件及其运行时闭包；幂等（版本一致跳过，不一致清空重装）。`build/market-plugin/` 已 gitignore，经 `files: ["build/market-plugin/**"]` 打进 asar。
+- **只暂存 4 个包**：`dshmarket` + `js-yaml` + `undici` + `argparse`。dshmarket 的 `@deepseek-ai/*` 导入（`dsh-settings`、`schemastery`，以及 client 的 inject 包）**由 DSH 加载器对核心安装目录解析**，profile 安装版也不带这些包进 profile（已用真实 pnpm profile 的 lockfile 验证：它的依赖只有 js-yaml/undici/argparse）——**不要**把 `@deepseek-ai/*` 拷进 profile（会出现核心包第二实例）。
+- **运行时**：`prepareDesktopPlugin()`（每次 spawn DSH 前）先 `stageBundledMarket()`：把包暂存进 `<DSH_HOME>/profiles/web/node_modules`（`dshmarket` 每次覆盖——壳拥有这份拷贝；依赖包只在**缺失或主版本不一致**时填充，绝不覆盖 profile 里兼容的拷贝——pnpm 可能管理着那棵 node_modules），然后在生成的 patch 里追加 `- insert: { id: dsh-market, name: 'dshmarket', config: { allowRestart: false } }`。
+- **`allowRestart: false` 必须带**：插件自带的"重启 DSH"会直接 spawn 一个新核心进程，绕过 Electron 壳的生命周期管理——壳会把原进程退出误判成崩溃弹错误面板。壳有自己的 DSH 重启机制（`restartDSH`/更新流程）。
+- **用户已自行安装时绝不重复挂载**（大坑）：Cordis 的 `- insert:` 是**无条件追加**（源码见 `dsh-app-boot` 的 `applyEntryPatches`），同 id 再插一行会把插件**挂载两次**（服务/UI 全重复）。所以挂载前先检测 profile 是否已挂载 dshmarket：`profiles/web/package.json` 的 `dsh.profile.bundles` 含 `"dshmarket"`，或 `cordis.patch.yml` 文本含 `dshmarket`——命中则**不暂存、不加行**，以用户自己的安装为准。
+- **开关**：设置"内置插件市场"（`bundleMarket`，默认开，存 `update-settings.json`）关掉后不再暂存/挂载——用户在 profile 里卸载市场后靠它避免壳自动装回。改动**重启 DSH 生效**（patch 每次 spawn 才重组装）。
+- profile 的 node_modules 可能被 pnpm 管理，pnpm prune 会清掉壳暂存的"外来"拷贝——无妨，下次 spawn DSH 会重新暂存（自愈）。
+
 ### 3. Electron ↔ DSH 通信（三条通道）
 
 | 通道 | 方向 | 用途 |
@@ -120,9 +134,9 @@ window.__ModuleLoader__.load({
 
 ### 4. 窗口控制条（沉浸式，不重叠）
 
-- frameless 窗口；控制条用 `shell.overlay` Slot，是一条 **36px 顶部条**，**起点 = 侧栏右缘**（插件/兜底都用 JS 量侧栏 `getBoundingClientRect().right` 设 `left`，侧栏收窄/折叠/窗口缩放时用 `ResizeObserver` + `resize` 同步），**除右侧按钮外整条可拖拽**（`-webkit-app-region: drag`），按钮 `no-drag`。
-- **macOS 按钮点不动（大坑）**：`-webkit-app-region: drag` 放在**父容器**上时，macOS 会把整条区域当成拖拽区，`no-drag` 子按钮偶尔收不到点击。**修复**：容器本身**不带 app-region**，改用一个独立的绝对定位 `.dsh-desktop-drag` 兄弟条（`left:0; right:132px`）承载 `drag`，按钮显式 `no-drag` + `pointer-events:auto`（`shell.overlay` 宿主层是 `pointer-events:none`，子级靠 `.overlayLayer>*{pointer-events:auto}` 恢复，仍要显式加固）。
-- **窗口拖拽区**：原来拖拽区只是右上角 150px 控制条里 18px 的细缝，macOS 上基本拖不动。现在控制条从侧栏右缘一直延伸到按钮，从顶部按住拖动即可移动窗口。
+- frameless 窗口；控制条用 `shell.overlay` Slot，是一条 **36px 顶部条**，**起点 = 侧栏右缘**（插件/兜底都用 JS 量侧栏 `getBoundingClientRect().right` 设 `left`，侧栏收窄/折叠/窗口缩放时用 `ResizeObserver` + `resize` 同步）。**容器本身 `pointer-events:none`**——透明区绝不吞掉下方会话头部/侧栏的点击；只有按钮、胶囊和拖拽条各自恢复 `pointer-events:auto`。
+- **macOS 按钮点不动（大坑）**：`-webkit-app-region: drag` 放在**父容器**上时，macOS 会把整条区域当成拖拽区，`no-drag` 子按钮偶尔收不到点击。**修复**：容器本身**不带 app-region**，改用独立的绝对定位 `.dsh-desktop-drag` 兄弟条承载 `drag`，按钮显式 `no-drag` + `pointer-events:auto`（`shell.overlay` 宿主层是 `pointer-events:none`，子级靠 `.overlayLayer>*{pointer-events:auto}` 恢复，仍要显式加固）。
+- **窗口拖拽区（细条 + 运行时量高，勿改回整条 36px）**：曾经拖拽区是整条 36px 高的顶部条——它盖住会话头部（DSH 头部 `padding-top` 只有 12px），macOS 上拖拽区会整个吃掉点击，标题栏 crumbs/tabs/操作点不动。现在两条拖拽条都是**细条**，高度由 `topClearance()` **运行时测量**：该区域第一个**可见**可交互元素（`button/a/[role=button]/input…`，隐藏元素跳过）距窗口顶部的距离减 2px，兜底 12px（= 头部 padding-top）。① `.dsh-desktop-drag` 在会话/详情列上方，高度 = 会话头部（`[data-slot="conversation.session.header"]`）的空余量，clamp **6–16px**（上限故意压低：万一头部首行全是纯文本、第一个可交互元素是第二行的 tab，细条也不会探进 title row）；② `.dsh-desktop-drag-side` 用 `right:100%` 探出控制条左缘、铺满侧栏宽度，高度 = 侧栏第一个按钮（brand/toggle）上方的空余量，clamp 6–28px——**侧栏 logo 和按钮上方也能拖窗口**。**不要**给侧栏容器本身加 drag（会触发上面那条 macOS 吞点击的坑，brand/折叠按钮必须永远可点）。
 - **侧栏保持通顶、不被遮挡**：控制条从侧栏右缘才开始（JS 测量），侧栏品牌/折叠按钮永远可点、侧栏背景通到窗口顶部。**不要**用"整个 AppFrame 下移"方案（`div:has(> [data-shell-overlay]){padding-top:36px}`）——那样侧栏顶部会空出 36px 页面背景的缝，很难看。
 - **Session log 按钮搬进控制条**：DSH 头部原来在右上角的 "Session log" 按钮与控制条按钮相撞。**不再用任何"下移/左挤"方案**（`padding-right:150px`、整屏下移、整行/单按钮下移都已废弃——都会拉高头部或留下难看的空隙）。改为：① 在控制条里**最小化按钮左边**重做一个 `Session log` 胶囊按钮（`SessionLogButton`，`ctx.sessions.list.getSnapshot().current` 拿当前会话 id，复刻 `dsh-session-log-export` 的下载逻辑：`HEAD /api/session.export?sessionId=<id>&includeDescendants=true` 后触发浏览器下载）；② CSS `[data-dsh-desktop] [class*="sessionLogButton"]{display:none!important}` 隐藏 DSH 原按钮——**只限桌面**：`apply()` 检测到 Electron 桥（`window.dshDesktop`）时给 `<html>` 打 `data-dsh-desktop` 标记，普通浏览器不打标记、保留 DSH 原按钮（桌面壳拉起的同一个 DSH 实例被浏览器直接访问时，插件仍挂载，必须靠这个标记区分）。**会话头部完全保持原始布局**（crumbs/tabs 间距不变）。③ 按钮**只在有打开的、且已有对话内容的会话时显示**——`SessionLogButton` 订阅 `sessions.list`：`current` 有值 **且** 该会话 `summary.blank` 不为 true 才渲染（空白新会话——还没有任何对话内容——不显示，与 DSH 头部隐藏逻辑一致）；控制条用 `MutationObserver` 监听子节点变化，按钮出现/消失时重新测量拖拽区终点，避免拖拽区盖住按钮。
 - **拖拽区终点 = 按钮起点**：控制条 `left` 用 JS 量侧栏右缘，拖拽区 `right` 也用 JS 量最左按钮（Session log 胶囊宽度不固定，不能写死 132px）——`window.innerWidth - firstBtnRect.left`，随窗口缩放/侧栏变化同步。
@@ -134,19 +148,19 @@ window.__ModuleLoader__.load({
 
 - 设置"常驻通知栏"开启后，关窗 `event.preventDefault()` + `mainWindow.hide()` 到托盘；托盘右键菜单"打开/退出"。
 - **托盘图标在开启设置的当下就创建**（`whenReady` 时 `readSettings().closeToTray && ensureTray()`；开关 IPC 里 `setCloseToTray` 即时 `ensureTray()/destroyTray()`）——**不能只在用户点关闭时才建托盘**，否则用户不开窗就永远看不到图标、也没法恢复窗口。
-- 托盘图标：Windows/Linux 用 `build/tray-icon.png`（DeepSeek 蓝圆角 + 白鲸鱼，带边距）；**macOS 必须用小尺寸「模板」图**（菜单栏图标，黑 + 透明），用 `build/tray-iconTemplate.png`(16px) + `tray-iconTemplate@2x.png`(32px)，`setTemplateImage(true)` 让系统按明/暗菜单栏着色——原 64px 彩色图在 Mac 菜单栏会显示得过大。Linux 无托盘环境 `new Tray` 失败会优雅降级（关窗直接退出）。
+- 托盘图标：Windows/Linux 用 `build/tray-icon.png`（DeepSeek 蓝圆角 + 白鲸鱼，带边距）；**macOS 必须用小尺寸「模板」图**（菜单栏图标，黑 + 透明），用 `build/tray-iconTemplate.png`(**22×16pt**) + `tray-iconTemplate@2x.png`(44×32px)，`setTemplateImage(true)` 让系统按明/暗菜单栏着色——原 64px 彩色图在 Mac 菜单栏会显示得过大。**模板图是宽画布、鲸鱼按高度适配（87.5%）**：鲸鱼本身宽高比 ≈1.36:1，曾经在 16×16 方画布上按宽度 80% 适配，可见高度只有画布的 59%（垂直边距 ~40%），菜单栏里看着比别的图标小一半；宽画布（如电池图标）+ 按高度适配后可见高度 14pt，与标准菜单栏图标一致。Linux 无托盘环境 `new Tray` 失败会优雅降级（关窗直接退出）。
 - 真正退出（菜单退出、更新重启、app.quit）必须先 `isQuitting = true`，否则 close 拦截会把窗口藏进托盘。
 - macOS `activate`（点 Dock 图标）改为：窗口存在（哪怕藏在托盘）就 `show()+focus()`，否则重建——否则 Dock 点了没反应。
 
 ### 6. 阻止休眠 / 任务通知
 
 - 阻止休眠：`powerSaveBlocker.start("prevent-app-suspension")`，返回 id，`powerSaveBlocker.stop(id)` 释放；设置持久化在 `update-settings.json`。
-- 设置项：`autoUpdate` / `closeToTray` / `preventSleep` / `taskNotify` / `port`，都存在 `%APPDATA%\...\update-settings.json`。
+- 设置项：`autoUpdate` / `closeToTray` / `preventSleep` / `taskNotify` / `bundleMarket` / `port`，都存在 `%APPDATA%\...\update-settings.json`。
 
 ### 7. 图标
 
 - 源 = `build/whale.svg`（DeepSeek 鲸鱼，从 `@deepseek-ai/dsh-client-ui-primitives` 的 `FishLogo` 提取的 path）。
-- `npm run icon` 用 `@resvg/resvg-js`（纯 Node SVG 光栅化）生成 64/256/512 PNG，外加 macOS 托盘模板图 `tray-iconTemplate.png`(16px)/`tray-iconTemplate@2x.png`(32px，黑色鲸鱼+透明)。**不要用 Electron 离屏渲染**（本机 >128px 就崩）。
+- `npm run icon` 用 `@resvg/resvg-js`（纯 Node SVG 光栅化）生成 64/256/512 PNG，外加 macOS 托盘模板图 `tray-iconTemplate.png`(22×16pt)/`tray-iconTemplate@2x.png`(44×32px，黑色鲸鱼+透明，宽画布按高度适配)。**不要用 Electron 离屏渲染**（本机 >128px 就崩）。
 - electron-builder 的 `win.icon`/`mac.icon`/`linux.icon` 打包时自动转换 .ico/.icns。
 - Windows 任务栏图标跟随 **exe 资源图标**（开发 `npm start` 显示 electron 默认图标，打包后才是鲸鱼——Electron 固有限制）。
 
@@ -189,7 +203,8 @@ npm install          # 装依赖（首次）
 npm run icon         # 重新生成图标（改了鲸鱼配色/边距后）
 npm start            # 开发运行（frameless 窗口；用系统 node）
 npm run fetch:node   # 下载内置 Node（当前平台/架构）到 build/node/<os>-<arch>/
-npm run pack         # 打包目录到 dist/win-unpacked/
+npm run fetch:market # 下载内置插件市场到 build/market-plugin/（dist:* 会自动跑）
+npm run pack         # 打包目录到 dist/win-unpacked/（会先 fetch market）
 npm run dist:win     # NSIS 安装包（会自动 fetch node）
 npm run dist:mac     # macOS dmg（会自动 fetch node）
 npm run dist:linux   # Linux AppImage（会自动 fetch node）
@@ -247,3 +262,4 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_NPM` | 覆盖要 spawn 的 npm 可执行文件绝对路径（仅非内置回退时用） |
 | `DSH_DESKTOP_NODE_VERSION` | `scripts/fetch-node.js` 下载的 node 版本（默认 24.19.0 LTS） |
 | `DSH_DESKTOP_NODE_MIRROR` | 内置 node 下载镜像（默认 npmmirror，回退 nodejs.org） |
+| `DSH_DESKTOP_MARKET_VERSION` | `scripts/fetch-market-plugin.js` 下载的 dshmarket 版本（默认 1.15.0） |

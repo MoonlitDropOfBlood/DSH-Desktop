@@ -27,6 +27,10 @@ jobs:
         run: node scripts/fetch-node.js win x64
         env:
           DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
+      - name: Fetch bundled plugin market
+        run: node scripts/fetch-market-plugin.js
+        env:
+          DSH_DESKTOP_NPM_REGISTRY: "https://registry.npmjs.org"
       - name: Build NSIS (x64)
         run: npx electron-builder --win nsis --x64 --publish never
         env:
@@ -50,6 +54,10 @@ jobs:
         run: node scripts/fetch-node.js linux x64
         env:
           DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
+      - name: Fetch bundled plugin market
+        run: node scripts/fetch-market-plugin.js
+        env:
+          DSH_DESKTOP_NPM_REGISTRY: "https://registry.npmjs.org"
       - name: Build AppImage + deb + rpm
         run: npx electron-builder --linux --publish never
         env:
@@ -82,6 +90,10 @@ jobs:
         run: node scripts/fetch-node.js mac ${{ matrix.arch }}
         env:
           DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
+      - name: Fetch bundled plugin market
+        run: node scripts/fetch-market-plugin.js
+        env:
+          DSH_DESKTOP_NPM_REGISTRY: "https://registry.npmjs.org"
       - name: Build dmg (${{ matrix.arch }})
         # GitHub 的 macos-14 runner 是 Apple Silicon；electron-builder 可在其上
         # 交叉构建 x64 与 arm64 的 dmg（macos-13/Intel runner 已被 GitHub 弃用）。
