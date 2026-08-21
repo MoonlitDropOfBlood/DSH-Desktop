@@ -783,6 +783,29 @@ function dshHomeDir() {
 function majorOf(v) { const m = String(v || "").match(/\d+/); return m ? m[0] : null; }
 
 /**
+ * Recursively copy a directory tree with asar-safe primitives ONLY.
+ *
+ * WHY NOT fs.cpSync: this project's source directory is shipped inside an
+ * asar archive (app.asar). Electron patches individual fs calls
+ * (readdirSync/statSync/copyFileSync/...) to be asar-transparent, but
+ * fs.cpSync's internal recursive walker uses a low-level opendir that
+ * bypasses the patch — copying OUT of an asar with fs.cpSync throws
+ * ENOTDIR/ENOENT. That silently broke the bundled market staging on every
+ * packaged install (the dev profile works only because it is a real pnpm
+ * install, so this path never ran locally). Every call below is one of the
+ * asar-aware primitives.
+ */
+function copyDirRecursive(src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src)) {
+    const s = path.join(src, entry);
+    const d = path.join(dst, entry);
+    if (fs.statSync(s).isDirectory()) copyDirRecursive(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
+
+/**
  * Copy one staged package into the profile. mode "always" overwrites (the
  * desktop owns the dshmarket copy); mode "compatible" only fills in when the
  * package is missing or the existing copy's major version differs — the
@@ -801,7 +824,7 @@ function stagePackage(srcDir, name, dstDir, mode) {
     } catch { /* unreadable — refresh it below */ }
   }
   fs.rmSync(dst, { recursive: true, force: true });
-  fs.cpSync(src, dst, { recursive: true });
+  copyDirRecursive(src, dst);
 }
 
 /**
@@ -862,7 +885,15 @@ function prepareDesktopPlugin() {
       "- insert:\n" +
       "  - id: dsh-desktop-plugin\n" +
       "    name: 'dsh-desktop-plugin'\n";
-    if (stageBundledMarket()) {
+    let marketMounted = false;
+    try {
+      marketMounted = stageBundledMarket();
+    } catch (err) {
+      // A market staging failure must never drop the window-controls patch:
+      // report it and continue with the desktop plugin alone.
+      log(`bundled market staging failed (continuing without it): ${err.message}`);
+    }
+    if (marketMounted) {
       patch +=
         "# Built-in plugin market (dshmarket), staged into the profile by the shell.\n" +
         "- insert:\n" +

@@ -6,7 +6,20 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
-## [Unreleased]
+## [1.3.1] - 2026-08-21
+
+### 修复
+
+- **内置插件市场在打包安装后不加载（大坑，v1.3.0 回归）**：`stagePackage()` 用
+  `fs.cpSync(src, dst, { recursive: true })` 从 `app.asar` 里把 `dshmarket` 复制进
+  profile 的 `node_modules`。Electron 的 asar 补丁只覆盖单文件原语
+  （`readdirSync`/`statSync`/`copyFileSync`/…），`fs.cpSync` 内部的递归遍历走底层
+  `opendir`，绕过补丁——从 asar 内复制目录会抛 `ENOTDIR`/`ENOENT`。该异常一路冒泡到
+  `prepareDesktopPlugin()` 的 try/catch，导致整个 patch 文件不生成、`--patch` 不传，
+  打包版 dshmarket（甚至窗口控制条）全部不挂载。开发机上"能用"只是因为 profile 里是
+  真实的 pnpm 安装（`stageBundledMarket` 检测到已装就直接跳过、从不走这条复制路径）。
+  修复：改为逐项 `readdirSync`+`statSync`+`copyFileSync` 的递归复制（全部 asar 安全原语），
+  并把市场暂存失败改为非致命——单次失败只记录日志、不拖垮窗口控制条 patch。
 
 ## [1.3.0] - 2026-08-20
 
