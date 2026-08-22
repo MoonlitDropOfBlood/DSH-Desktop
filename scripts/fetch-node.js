@@ -41,12 +41,15 @@ const { spawnSync } = require("child_process");
 const VERSION = process.env.DSH_DESKTOP_NODE_VERSION || "24.19.0";
 const MIRROR = process.env.DSH_DESKTOP_NODE_MIRROR || "https://npmmirror.com/mirrors/node";
 const FALLBACK_MIRROR = "https://nodejs.org/dist";
+// Arch override for cross builds (e.g. building a darwin-x64 dmg on an Apple
+// Silicon runner): DSH_DESKTOP_NODE_ARCH=x64 fetches the x64 binary.
+const ARCH = process.env.DSH_DESKTOP_NODE_ARCH || process.arch;
 const OUT = path.join(__dirname, "..", "build", "node");
 
 function log(...a) { console.log("[fetch-node]", ...a); }
 
 function platformKey() {
-  const key = `${process.platform}-${process.arch}`;
+  const key = `${process.platform}-${ARCH}`;
   const known = {
     "win32-x64": 1, "win32-ia32": 1,
     "darwin-x64": 1, "darwin-arm64": 1,

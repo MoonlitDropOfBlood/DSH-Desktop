@@ -6,6 +6,19 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.4.2] - 2026-08-23
+
+### 修复
+
+- **GitHub Actions 构建的安装包缺失内置 Node（v1.4.1 发布缺陷）**：CI 工作流（`build-installers.yml`）
+  用 `npx electron-builder` 直接构建，绕过了 package.json 脚本，因此从未执行 `fetch:node`——`build/node`
+  在 CI 上不存在，`extraResources` 打不进内置 node，v1.4.1 的发布版实际回退到 Electron 内嵌运行时，
+  Windows 命令弹窗问题依旧。修复：三个平台 job（win/linux/mac×x64/arm64）在 electron-builder 前显式
+  增加 `node scripts/fetch-node.js` 步骤；mac 交叉构建（Apple Silicon runner 出 x64 dmg）通过
+  `DSH_DESKTOP_NODE_ARCH` 指定目标架构下载对应 node 二进制。
+- `scripts/fetch-node.js` 新增 `DSH_DESKTOP_NODE_ARCH` 环境变量：跨架构构建时指定要下载的 Node 架构
+  （默认取当前 `process.arch`）。
+
 ## [1.4.1] - 2026-08-23
 
 ### 修复

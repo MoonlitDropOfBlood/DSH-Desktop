@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness Desktop",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Desktop wrapper for DeepSeek Harness: embeds the DSH web UI with window controls, tray, and update management. DSH core is NOT bundled — it is installed via npm on the target machine.",
   "license": "MIT",
   "main": "main.js",
