@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness Desktop",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Desktop wrapper for DeepSeek Harness: embeds the DSH web UI with window controls, tray, and update management. DSH core is NOT bundled — it is installed via npm on the target machine.",
   "license": "MIT",
   "main": "main.js",
@@ -14,12 +14,13 @@
     "icon": "node scripts/make-tray-icon.js",
     "fetch:market": "node scripts/fetch-market-plugin.js",
     "fetch:pnpm": "node scripts/fetch-pnpm.js",
-    "pack": "npm run fetch:market && npm run fetch:pnpm && electron-builder --dir",
-    "dist": "npm run fetch:market && npm run fetch:pnpm && electron-builder",
-    "dist:win": "npm run fetch:market && npm run fetch:pnpm && electron-builder --win nsis",
-    "dist:mac": "npm run fetch:market && npm run fetch:pnpm && electron-builder --mac",
-    "dist:linux": "npm run fetch:market && npm run fetch:pnpm && electron-builder --linux",
-    "dist:portable": "npm run fetch:market && npm run fetch:pnpm && electron-builder --win portable"
+    "fetch:node": "node scripts/fetch-node.js",
+    "pack": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --dir",
+    "dist": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder",
+    "dist:win": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --win nsis",
+    "dist:mac": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --mac",
+    "dist:linux": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --linux",
+    "dist:portable": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --win portable"
   },
   "build": {
     "appId": "ai.deepseek.dsh.desktop",
@@ -42,6 +43,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "build/node",
+        "to": "node"
       }
     ],
     "directories": {

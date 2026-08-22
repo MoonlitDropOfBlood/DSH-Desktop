@@ -6,7 +6,9 @@
  * A thin Electron shell (published to GitHub) that does NOT bundle the DSH
  * core. DSH is installed on the target machine into the app's user-data
  * directory via the bundled pnpm (npm fallback), and launched under the
- * Electron-embedded Node runtime (ELECTRON_RUN_AS_NODE). An update check on
+ * bundled standalone Node runtime (build/node, a real console-subsystem
+ * node binary; see `bundledNode()`), with the Electron-embedded Node
+ * (ELECTRON_RUN_AS_NODE) as the fallback. An update check on
  * start + a "检查更新" menu keeps DSH up to date (registry HTTP version
  * query + pnpm add).
  *
@@ -22,8 +24,8 @@
  *      local install such as the npm _npx cache), installing via the bundled
  *      installer when none exists (with a determinate progress bar),
  *   2. pre-check the port; on conflict offer a change-port panel,
- *   3. spawn the core under the embedded Node runtime (`ELECTRON_RUN_AS_NODE`,
- *      default port 3080),
+ *   3. spawn the core under the bundled standalone Node runtime (default
+ *      port 3080),
  *   4. stream install/DSH output into the splash so progress is visible,
  *      route every startup/crash failure to the splash error panel (retry /
  *      change port / quit) instead of a bare system popup,
@@ -483,46 +485,93 @@ function probeFastestRegistry(cb) {
   setTimeout(() => { if (!chosen) finish(currentRegistry); }, 10000);
 }
 
-// ---- DSH runtime: the Electron-embedded Node (no bundled Node) -------------
-// Since Electron 43 the shell's own process IS Node 24 — spawning the Electron
-// binary with ELECTRON_RUN_AS_NODE=1 runs it as PLAIN Node (Chromium never
-// initializes), verified end-to-end booting the full DSH core including its
-// NAPI native modules (koffi/sharp/node-pty). This replaced the bundled Node
-// distribution (scripts/fetch-node.js + extraResources, ~100 MB per installer
-// and ~30 MB compressed): one runtime to maintain, and no pinned-Node version
-// drift like the 1.2.0 incident (bundled 22.14 lacked the node:zlib zstd APIs
-// DSH rc.7 imports — the embedded runtime now tracks Electron's Node).
-//
-// Trade-off accepted: DSH's child processes (MCP servers, `dsh plugin`) see
-// whatever node/npm/pnpm the USER's PATH provides (the terminal-profile merge
-// below covers bare GUI launches); a machine with no user-installed Node runs
-// DSH fine but cannot run npx-based MCP servers.
+// ---- DSH runtime: bundled standalone Node (preferred) -----------------------
+// The DSH core is spawned by this shell with windowsHide:true, and Windows
+// console behavior depends on the SUBSYSTEM of the spawned binary:
+//   - a REAL node (node.exe, CONSOLE subsystem) under CREATE_NO_WINDOW gets a
+//     WINDOWLESS console that every descendant inherits — so the whole DSH
+//     tree (sandbox runner → confined PowerShell) runs with no visible window,
+//     and the DSH core's own code stays completely unmodified;
+//   - the Electron binary (GUI subsystem, run as Node via ELECTRON_RUN_AS_NODE)
+//     NEVER has a console (GUI processes do not participate in console
+//     inheritance at all), so the sandbox runner has none to pass down and its
+//     confined PowerShell child allocates a VISIBLE console for every command —
+//     the Windows console-popup regression that followed removing the bundled
+//     Node.
+// Therefore the shell ships a pinned standalone Node (scripts/fetch-node.js →
+// build/node/<platform-arch> → extraResources `<resources>/node`), preferring
+// it over the embedded runtime. Cost: ~30 MB per installer, accepted so the
+// core stays pristine and console-clean. The embedded runtime remains the
+// fallback (tracking Electron's Node), and DSH_DESKTOP_NODE / npm_node_execpath
+// override everything.
+
+/** DSH core's Node floor: node:zlib zstd APIs (the 1.2.0 incident). */
+const MIN_NODE_MAJOR = 22;
+const MIN_NODE_MINOR = 15;
+
+/** The bundled standalone Node binary, if present (packaged or dev build). */
+function bundledNode() {
+  try {
+    const dir = `${process.platform}-${process.arch}`;
+    const file = process.platform === "win32" ? "node.exe" : "node";
+    const candidates = [
+      path.join(process.resourcesPath, "node", dir, file),
+      path.join(__dirname, "build", "node", dir, file)
+    ];
+    for (const c of candidates) {
+      try { if (fs.existsSync(c)) return c; } catch { /* keep looking */ }
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+/** Parse a binary's `--version` output into [major, minor, patch], or null. */
+function nodeVersion(bin) {
+  try {
+    const out = execFileSync(bin, ["--version"], { encoding: "utf8", timeout: 10000 });
+    const m = String(out).match(/v(\d+)\.(\d+)\.(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  } catch { return null; }
+}
+
+/** Whether a [major, minor] version tuple meets the given floor. */
+function nodeAtLeast(majorMinor, minMajor, minMinor) {
+  if (!majorMinor) return false;
+  return majorMinor[0] > minMajor || (majorMinor[0] === minMajor && majorMinor[1] >= minMinor);
+}
 
 /**
  * The runtime that executes the DSH core and the installer.
- * Returns `{ command, runAsNode }`: normally the Electron binary ITSELF
- * (spawn with env ELECTRON_RUN_AS_NODE=1); DSH_DESKTOP_NODE /
- * npm_node_execpath override with a REAL node binary (no flag then).
+ * Returns `{ command, runAsNode }`:
+ *   1. DSH_DESKTOP_NODE / npm_node_execpath override (a real node, no flag),
+ *   2. the bundled standalone node (no flag),
+ *   3. the Electron binary itself with ELECTRON_RUN_AS_NODE=1 (fallback).
  */
 function dshRuntime() {
   const override = process.env.DSH_DESKTOP_NODE || process.env.npm_node_execpath;
   if (override) {
     try { if (fs.existsSync(override)) return { command: override, runAsNode: false }; } catch { /* fall through */ }
   }
+  const bundled = bundledNode();
+  if (bundled) {
+    const v = nodeVersion(bundled);
+    if (nodeAtLeast(v, MIN_NODE_MAJOR, MIN_NODE_MINOR)) {
+      return { command: bundled, runAsNode: false };
+    }
+    log(`bundled node@${v ? v.join(".") : "?"} below DSH's Node floor — falling back to embedded runtime`);
+  }
   return { command: process.execPath, runAsNode: true };
 }
 
 /**
- * DSH core needs Node >= 22.15 (node:zlib zstd APIs). With the Electron
- * runtime that is a property of the shell build; a real-node override
- * bypasses the check (the override binary's own version then governs).
+ * DSH core needs Node >= 22.15 (node:zlib zstd APIs). A real node (bundled or
+ * override) was already version-gated in dshRuntime(); only the embedded
+ * runtime (a build property of the shell) is re-checked here.
  */
-function runtimeSupportsDsh() {
-  if (process.env.DSH_DESKTOP_NODE || process.env.npm_node_execpath) return true;
-  const m = String(process.versions.node || "").match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!m) return false;
-  const [maj, min] = [Number(m[1]), Number(m[2])];
-  return maj > 22 || (maj === 22 && min >= 15);
+function runtimeSupportsDsh(runtime) {
+  if (!runtime.runAsNode) return true;
+  const m = String(process.versions.node || "").match(/^(\d+)\.(\d+)/);
+  return nodeAtLeast(m && [Number(m[1]), Number(m[2])], MIN_NODE_MAJOR, MIN_NODE_MINOR);
 }
 
 // ---- bundled pnpm (extraResources → <resources>/pnpm) ----------------------
@@ -1205,10 +1254,12 @@ function spawnDSH() {
 
 function doSpawn(found) {
   const { bin, base } = found;
+  const runtime = dshRuntime();
   // The DSH core requires Node >= 22.15 (node:zlib zstd APIs — the 1.2.0
-  // incident). With the Electron runtime the embedded version is a build
-  // property of the shell; refuse loudly instead of a cryptic boot crash.
-  if (!runtimeSupportsDsh()) {
+  // incident). A real node (bundled or override) was already version-gated in
+  // dshRuntime(); only the embedded Electron-Node fallback can be too old, so
+  // refuse loudly instead of a cryptic boot crash.
+  if (!runtimeSupportsDsh(runtime)) {
     showStartupError({
       message: "内置运行时版本过低",
       detail: `DSH 核心需要 Node.js ≥ 22.15（node:zlib zstd API），当前壳内嵌 Node ${process.versions.node}。\n请升级桌面壳版本，或设 DSH_DESKTOP_NODE 指向一个 ≥22.15 的 Node 二进制。\n\n最近日志：\n${logTail.slice(-20).join("\n")}`,
@@ -1216,7 +1267,6 @@ function doSpawn(found) {
     });
     return;
   }
-  const runtime = dshRuntime();
   const portArgs = resolvePortArgs();
   // Mount the window-controls client plugin via a --patch overlay. `--patch`
   // is a launcher flag that conflicts with the `web` SUBcommand, so use the

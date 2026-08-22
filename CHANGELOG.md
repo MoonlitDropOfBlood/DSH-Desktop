@@ -6,6 +6,26 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.4.1] - 2026-08-23
+
+### 修复
+
+- **Windows 下执行命令弹出控制台窗口（实测 Windows 11）**：DSH 核心曾改用 Electron 内嵌 Node
+  （`ELECTRON_RUN_AS_NODE`）运行——Electron 二进制是 **GUI 子系统** PE，**永远不会获得/继承控制台**
+  （GUI 进程不参与控制台继承，实测 pids=0），于是沙箱 runner 无控制台可传给受限 PowerShell 子进程，
+  子进程只能**自己新建可见控制台窗口**，每条命令弹一个（移除独立 Node 后的回归）。修复：恢复**内置独立
+  Node**（`scripts/fetch-node.js` 拉取 pin 版本 Node 24 LTS → `build/node/<平台-架构>` → extraResources
+  `<resources>/node/<平台-架构>`），`dshRuntime()` 优先用它跑核心/安装器。真实 node 是 **Console 子系统**，
+  `CREATE_NO_WINDOW` 下得到**无窗口控制台**，整棵进程树（沙箱 runner → 受限 PowerShell）都继承它——
+  任何命令都不弹窗口，**且 DSH 核心代码保持 100% 原始**（升级/重装无兼容风险）。体积代价 ~30MB
+  （安装包实测 106MB→128MB）。内置 node 版本低于核心要求（≥22.15）时自动回退 Electron 内嵌并记日志。
+
+### 新增
+
+- `scripts/fetch-node.js`：`npm run fetch:node` 下载固定版本 Node LTS（默认 24.19.0，
+  `DSH_DESKTOP_NODE_VERSION` 覆盖，`DSH_DESKTOP_NODE_MIRROR` 换镜像，默认 npmmirror、回退 nodejs.org），
+  已接入所有 `pack`/`dist:*` 构建脚本。
+
 ## [1.4.0] - 2026-08-22
 
 ### 修复

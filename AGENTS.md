@@ -60,14 +60,18 @@ dsh-desktop/
 
 **rc.8+ 核心会默认打开系统浏览器（桌面壳必须拦截）**：核心 0.1.0-rc.8 起 `web` 命令默认把 URL 交给系统浏览器（`dsh-web-app` 配置 `openBrowser` 默认 true，官方开关 `--no-open`）。桌面壳有自己的 frameless 窗口，`doSpawn()` 固定追加 `--no-open`——但**必须按核心版本门禁**（`supportsNoOpen()`）：老核心的 commander 严格解析、遇未知选项直接 `error: unknown option` 退出（实测 rc.7 即炸），所以 <0.1.0-rc.8 的核心绝不能传。比较版本时注意 semver 形态：`0.1.0` 正式版比所有 `0.1.0-rc.N` 都新，先比数字三元组、相同再比 rc 号。
 
-### 1b. DSH 运行时 = Electron 内嵌 Node（ELECTRON_RUN_AS_NODE）
+### 1b. DSH 运行时 = 内置独立 Node（首选）+ Electron 内嵌 Node（回退）
 
-**机制**：Electron 43 内嵌 Node 24.18——已满足 DSH 核心的 Node ≥22.15 需求（node:zlib zstd）。`dshRuntime()` 直接返回 `process.execPath`（Electron 二进制自身），spawn 时加环境变量 `ELECTRON_RUN_AS_NODE=1`，该进程就是**纯 Node**（Chromium 完全不初始化）——已实测用它完整拉起 DSH 核心（含 koffi/sharp/node-pty 原生模块）并 HTTP 200。`DSH_DESKTOP_NODE` / `npm_node_execpath` 可覆盖为真实 node 二进制（此时不加 flag）；`runtimeSupportsDsh()` 在 spawn 前校验内嵌 Node 版本，过低弹错误面板而不是让核心启动即炸（1.2.0 事故的正式护栏）。
+**为什么内置独立 Node（2026-08 恢复，曾因 Electron 内嵌够用而移除）**：DSH 核心由壳以 `windowsHide:true` spawn。Windows 控制台行为取决于被 spawn 二进制的 **PE 子系统**：
+- **真实 node.exe（Console 子系统）** + `CREATE_NO_WINDOW` → 得到**无窗口控制台**，整棵进程树（沙箱 runner → 受限 PowerShell）都继承它，任何命令都不弹窗口——**且 DSH 核心代码零改动**。
+- **Electron 二进制（GUI 子系统，`ELECTRON_RUN_AS_NODE` 当 node 用）** → **永远不会获得/继承控制台**（GUI 进程不参与控制台继承，实测 pids=0），于是沙箱 runner 无控制台可传，受限 PowerShell 子进程只能**自己新建可见控制台窗口**——每条命令弹窗（移除独立 node 后出现的回归，实测确认）。
 
-- **不要恢复内置 Node**（`fetch-node.js` / `build/node/` 已删除）：内置 Node 曾是 macOS 裸环境的兜底，现在 Electron 内嵌运行时天然免疫；省 ~30MB 安装包体积，且 Electron 升级即 Node 升级，消灭"内置 node 版本漂移"这类事故（1.2.0 的 zstd 事故就是内置 22.14 落后于核心需求）。
-- **代价（明确接受）**：DSH 的子进程（MCP 服务、`dsh plugin` 等）只能看到**用户 PATH** 里的 node/npm/pnpm（终端 Profile 合并已覆盖 GUI 裸环境）；一台完全没装 Node 的机器能跑 DSH 但跑不了 npx 系 MCP 服务。
-- **原生模块前提**：Electron 的 NODE_MODULE_VERSION 与官方 Node 不同，但 DSH 树的原生包全是 **NAPI**（ABI 跨运行时稳定）所以兼容——**往核心里引入 NAN 原生包会破坏此方案**（届时该包需针对 Electron 重建）。
-- 开发时（`npm start`）：`process.execPath` 就是 `node_modules/electron/dist/electron`，同一条路径，行为一致。
+因此 `scripts/fetch-node.js`（`npm run fetch:node`）把固定版本 Node LTS（`DSH_DESKTOP_NODE_VERSION` 覆盖，默认 24.19.0）下到 `build/node/<平台-架构>/node(.exe)`，经 `extraResources` 以 `<resources>/node/<平台-架构>` 随包分发（`build/node` 全量拷入）。**安装包体积代价 ~30MB（实测 106MB→128MB），换取核心零改动 + Windows 无弹窗**。`bundledNode()` 解析它；`dshRuntime()` 优先级：`DSH_DESKTOP_NODE`/`npm_node_execpath` 覆盖 → 内置 node → Electron 内嵌（回退）。内置 node 版本低于核心要求（≥22.15，`MIN_NODE_MAJOR/MIN_NODE_MINOR`）时自动回退内嵌并记日志；内嵌版本过低才弹错误面板（1.2.0 zstd 事故的护栏）。安装器（pnpm）与核心用**同一个 runtime**（`installPlan` 也走 `dshRuntime()`），且 `runInstaller`/`doSpawn` 都带 `windowsHide:true` → 安装过程同样无窗口。
+
+- **为什么不用"给核心打补丁"修弹窗**：曾尝试壳托管补丁（启动时往 `dsh-sandbox-windows-acl`/`dsh-subprocess-local` 的 lib 注入 AllocConsole/windowsHide），但核心是 npm `@latest` 装的，补丁锚点随版本变化可能不匹配/不兼容——**已弃用**，核心保持 100% 原始（勿再往核心代码打补丁）。
+- **原生模块前提**：DSH 树的原生包全是 **NAPI**（ABI 跨官方 Node/Electron 稳定），内置 node 与 Electron 内嵌都能加载 koffi/sharp/node-pty；往核心里引入 NAN 原生包会破坏此方案。
+- **DSH 子进程可见的 node/npm/pnpm**：仍是**用户 PATH** 里的（终端 Profile 合并覆盖 GUI 裸环境）；内置 node 只用于跑核心/安装器，不会注入 PATH。一台完全没装 Node 的机器能跑 DSH 但跑不了 npx 系 MCP 服务。
+- 开发时（`npm start`）：`bundledNode()` 回退到 `build/node/<平台-架构>`（dev 路径），与打包版 `process.resourcesPath/node` 一致；没跑 `fetch:node` 则用 Electron 内嵌。
 - **spawn 参数固定带 `--expose-internals`（node 选项，非核心参数）**：核心 rc.7+ 的启动器在组合里没有 hmr 服务时会**无条件创建** `cordis-plugin-hmr`（用于监听 `cordis.patch.yml` 热重载），而 `Hmr` 构造函数硬性要求进程以 `node --expose-internals` 启动（`ctx.loader.internal` 只在该 flag 下存在）——没有它核心会启动后片刻崩死（rc.7 与 0.1.1-rc.2 全新 home 均实测复现，CLI 裸跑 `dsh web` 同样会炸，属核心侧问题）。该 flag 放在 `bin.js` **之前**、由 node 自己消费，永远到不了核心的 commander，**对新老核心都安全、无需版本门禁**（实测两版均完整启动 + HTTP 200）。
 
 ### 1c. 继承终端 Profile（MCP 修复，设置"继承终端 Profile"默认开）
@@ -262,7 +266,9 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_INSTALL_ESTIMATE_MB` | 安装进度条估算总大小（默认 250MB） |
 | `DSH_DESKTOP_INSTALL_STALL_SECONDS` | 下载无进展判定秒数（默认 120s，超时 kill npm） |
 | `DSH_DESKTOP_SHELL_REPO` | 壳自更新的 GitHub 仓库（默认 `MoonlitDropOfBlood/DSH-Desktop`） |
-| `DSH_DESKTOP_NODE` | 用真实的 Node 二进制覆盖 DSH 运行时（默认用 Electron 内嵌 Node + `ELECTRON_RUN_AS_NODE`；调试用） |
+| `DSH_DESKTOP_NODE` | 用真实的 Node 二进制覆盖 DSH 运行时（优先于内置 node 与 Electron 内嵌；调试用） |
+| `DSH_DESKTOP_NODE_VERSION` | `scripts/fetch-node.js` 下载的内置 Node 版本（默认 24.19.0，Node 24 LTS，≥核心 22.15 门槛） |
+| `DSH_DESKTOP_NODE_MIRROR` | 内置 Node 二进制镜像（默认 npmmirror，回退 nodejs.org） |
 | `DSH_DESKTOP_NPM` | 覆盖 npm 回退路径要 spawn 的 npm 可执行文件绝对路径（仅 pnpm 缺失的回退时用） |
 | `DSH_DESKTOP_MARKET_VERSION` | `scripts/fetch-market-plugin.js` 下载的 dshmarket 版本（默认 1.15.0） |
 | `DSH_DESKTOP_PNPM_VERSION` | `scripts/fetch-pnpm.js` 下载的内置 pnpm 版本（默认 10.33.0） |
