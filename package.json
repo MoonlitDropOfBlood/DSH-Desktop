@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DeepSeek Harness Desktop",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Desktop wrapper for DeepSeek Harness: embeds the DSH web UI with window controls, tray, and update management. DSH core is NOT bundled — it is installed via npm on the target machine.",
   "license": "MIT",
   "main": "main.js",
@@ -12,17 +12,14 @@
   "scripts": {
     "start": "electron .",
     "icon": "node scripts/make-tray-icon.js",
-    "fetch:node": "node scripts/fetch-node.js",
-    "fetch:node:win": "node scripts/fetch-node.js win x64",
-    "fetch:node:mac": "node scripts/fetch-node.js mac x64 && node scripts/fetch-node.js mac arm64",
-    "fetch:node:linux": "node scripts/fetch-node.js linux x64",
     "fetch:market": "node scripts/fetch-market-plugin.js",
-    "pack": "npm run fetch:market && electron-builder --dir",
-    "dist": "npm run fetch:market && electron-builder",
-    "dist:win": "npm run fetch:node:win && npm run fetch:market && electron-builder --win nsis",
-    "dist:mac": "npm run fetch:node:mac && npm run fetch:market && electron-builder --mac",
-    "dist:linux": "npm run fetch:node:linux && npm run fetch:market && electron-builder --linux",
-    "dist:portable": "npm run fetch:node:win && npm run fetch:market && electron-builder --win portable"
+    "fetch:pnpm": "node scripts/fetch-pnpm.js",
+    "pack": "npm run fetch:market && npm run fetch:pnpm && electron-builder --dir",
+    "dist": "npm run fetch:market && npm run fetch:pnpm && electron-builder",
+    "dist:win": "npm run fetch:market && npm run fetch:pnpm && electron-builder --win nsis",
+    "dist:mac": "npm run fetch:market && npm run fetch:pnpm && electron-builder --mac",
+    "dist:linux": "npm run fetch:market && npm run fetch:pnpm && electron-builder --linux",
+    "dist:portable": "npm run fetch:market && npm run fetch:pnpm && electron-builder --win portable"
   },
   "build": {
     "appId": "ai.deepseek.dsh.desktop",
@@ -40,8 +37,8 @@
     ],
     "extraResources": [
       {
-        "from": "build/node/${os}-${arch}",
-        "to": "node",
+        "from": "build/pnpm/node_modules/pnpm",
+        "to": "pnpm",
         "filter": [
           "**/*"
         ]
@@ -110,7 +107,7 @@
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.4.2",
-    "electron": "^33.0.0",
+    "electron": "^43.4.1",
     "electron-builder": "^25.1.8"
   }
 }

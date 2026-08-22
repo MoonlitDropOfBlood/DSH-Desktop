@@ -23,10 +23,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Fetch bundled Node (x64)
-        run: node scripts/fetch-node.js win x64
+      - name: Fetch bundled pnpm
+        run: node scripts/fetch-pnpm.js
         env:
-          DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
+          DSH_DESKTOP_NPM_REGISTRY: "https://registry.npmjs.org"
       - name: Fetch bundled plugin market
         run: node scripts/fetch-market-plugin.js
         env:
@@ -50,10 +50,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Fetch bundled Node
-        run: node scripts/fetch-node.js linux x64
+      - name: Fetch bundled pnpm
+        run: node scripts/fetch-pnpm.js
         env:
-          DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
+          DSH_DESKTOP_NPM_REGISTRY: "https://registry.npmjs.org"
       - name: Fetch bundled plugin market
         run: node scripts/fetch-market-plugin.js
         env:
@@ -86,10 +86,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Fetch bundled Node (${{ matrix.arch }})
-        run: node scripts/fetch-node.js mac ${{ matrix.arch }}
+      - name: Fetch bundled pnpm
+        run: node scripts/fetch-pnpm.js
         env:
-          DSH_DESKTOP_NODE_MIRROR: "https://nodejs.org/dist"
+          DSH_DESKTOP_NPM_REGISTRY: "https://registry.npmjs.org"
       - name: Fetch bundled plugin market
         run: node scripts/fetch-market-plugin.js
         env:

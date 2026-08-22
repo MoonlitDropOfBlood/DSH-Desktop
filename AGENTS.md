@@ -25,11 +25,10 @@ dsh-desktop/
 │   └── client.js           #   Client 半部：窗口控制条、侧栏更新徽章、设置页
 ├── scripts/
 │   ├── make-tray-icon.js   # 用 @resvg/resvg-js 从 whale.svg 生成各尺寸图标
-│   ├── fetch-node.js       # 下载官方 Node 发行版（含 npm）到 build/node/<os>-<arch>/
 │   ├── fetch-market-plugin.js # 下载内置插件市场 dshmarket 到 build/market-plugin/
+│   ├── fetch-pnpm.js       # 下载 pin 版本的 pnpm 到 build/pnpm/（DSH 核心的安装器）
 │   └── embed-exe-icon.js   # 本机无法解压 winCodeSign 时，用 rcedit 手动嵌 exe 图标
 └── build/
-    ├── node/               # 内置 Node（gitignore；打包时经 extraResources 随 app 分发）
     ├── market-plugin/      # 内置插件市场（gitignore；打包时经 files 随 app 分发）
     ├── whale.svg           # DeepSeek 鲸鱼矢量源（从 DSH FishLogo 提取）
     ├── icon.png            # 256px（Windows）
@@ -47,33 +46,35 @@ dsh-desktop/
 2. 应用自身 `node_modules`
 3. npm `_npx` 缓存里最新的一份完整安装（**复用，避免重复下载**）
 
-找不到就 `npm install --prefix <托管目录> @deepseek-ai/dsh@latest`（含 registry 探测 + 失败重试/换镜像）。
+找不到就 `pnpm add --dir <托管目录> @deepseek-ai/dsh@latest`（**内置 pnpm**：经 `node <resources>/pnpm/bin/pnpm.cjs` 运行，不依赖 PATH；含 registry 探测 + 失败重试/换镜像）。pnpm 不存在时（未跑 `fetch:pnpm` 的开发环境）回退老的 `npm install --prefix <托管目录> --no-save …`。
 
-**Windows 上 spawn npm 的引号坑（大坑，必读）**：**绝不要**把 npm 命令预拼成一个字符串再丢给 `cmd /d /s /c`，例如 `cmd /d /s /c "npm install --prefix "C:\...\dsh" ..."`，也不要用 `JSON.stringify(path)` 给参数加引号——cmd 的 `/s` 引号剥离会弄坏内嵌引号、按空格截断参数，npm 就会收到一个**相对路径** `--prefix "C:\...\DeepSeek`，然后报 `ENOENT: mkdir`，退出码 `4294963238`（只要路径含空格就必炸，例如 `C:\Users\wwhby\AppData\Roaming\DeepSeek Harness Desktop\dsh`）。**正确做法**：`spawn(cmd.exe, ["/d","/s","/c","npm", ...args])`，`npm` 和每个参数（含带空格的路径）作为独立 argv 传入，让 Node 的 CreateProcess 自动加引号；`--prefix` 传原始路径、不要 JSON.stringify。`queryLatest` 同理。
+**为什么用 pnpm 装核心（实测大坑，勿改回）**：壳的安装形态是"裸目录 + `@latest`"——首次安装没有任何本地状态；更新时新版本的兄弟包依赖区间钉在当次发版线（`^0.1.1-rc.x`），旧 lockfile 照样全部失效，所以**每次都是从零全树解析**。dsh 核心是 ~195 个互相依赖的 `@deepseek-ai/*` 包 + react peerDeps，npm 的 arborist 在这种树上 placeDep 超线性爆炸——实测**仅解析阶段就烧 >10 分钟 CPU 还没跑完**（内置 npm 11.17 与系统 npm 11.9 同样病态，与网络快慢无关）。同机同树实测 pnpm 解析+下载+链接（446 包）：**17.8s**；热 store 更新 **3.5s**。终端 npx/npm"快"只是因为命中 `_npx` 缓存或项目 lockfile，根本没做全树解析。
+
+**pnpm 化要点（main.js `installPlan` / `prepareManagedDir`）**：① 托管目录先补一个最小 `package.json`（`pnpm add` 需要），并**清掉 npm 时代留下的、无 `.modules.yaml` 的 node_modules**（pnpm 只覆盖它认识的包，旧文件会滞留 ~210MB 死重）；② store 固定在 `<userData>/pnpm-store`——必须与托管目录同卷，否则硬链接退化为全量复制；③ 必须带 `--config.confirmModulesPurge=false` 和 `--reporter=append-only`（splash 无 TTY，任何交互提示都会挂死安装；append-only 输出才能被进度日志逐行解析）；④ pnpm 默认不跑依赖的 install 脚本——本树的原生包（koffi/sharp/node-pty）全部以平台预编译包随 tarball 分发，无需脚本，与 npm 时代被 allow-scripts 门禁跳过的行为一致；⑤ `@tanstack/react-virtual` 的宽 peer 区间会让 pnpm 把 react-dom 解到 19.x（react 是 18.3.1）并打一条 "unmet peer" 警告——**惰性无害**（web 客户端是预构建 bundle，服务端不加载 react-dom），`pnpm.overrides` 的 `$react` 语法要求 react 是直接依赖、用不了，别加。⑥ 版本检查 `queryLatest()` 已改为直连 registry 的 `GET /<name>/<tag>`（一次 HTTP，不再 spawn `npm view`）。
+
+**Windows 上 spawn npm 的引号坑（大坑，必读）**：pnpm 主路径经 `node <pnpm.cjs>` 直跑、不经过 cmd，天然免疫此坑；npm 回退路径仍需遵守——**绝不要**把 npm 命令预拼成一个字符串再丢给 `cmd /d /s /c`，例如 `cmd /d /s /c "npm install --prefix "C:\...\dsh" ..."`，也不要用 `JSON.stringify(path)` 给参数加引号——cmd 的 `/s` 引号剥离会弄坏内嵌引号、按空格截断参数，npm 就会收到一个**相对路径** `--prefix "C:\...\DeepSeek`，然后报 `ENOENT: mkdir`，退出码 `4294963238`（只要路径含空格就必炸，例如 `C:\Users\wwhby\AppData\Roaming\DeepSeek Harness Desktop\dsh`）。**正确做法**：每个参数（含带空格的路径）作为独立 argv 传入 `spawn`，让 Node 的 CreateProcess 自动加引号；`--prefix`/`--dir` 传原始路径、不要 JSON.stringify。
 
 **DSH 的 npm 仓库**：`@deepseek-ai/dsh` 发布在官方 **npmjs.org**（`https://registry.npmjs.org`），国内常用 npmmirror 镜像同步。默认 `DEFAULT_NPM_REGISTRY` = npmmirror（国内快），探测/失败时回退 npmjs.org。可用 `DSH_DESKTOP_NPM_REGISTRY` 覆盖。
 
 **不要用 `npx` 启动 DSH**：本机网络下 npx 在线解析 `@latest` 会挂死在 CDN 节点，`npx --offline` 在 npm 11 + 大缓存下病态空转。**直接 `node <bin> web --patch <patch>` 最可靠**。
 
-### 1b. 内置 Node（`scripts/fetch-node.js` + extraResources → `resources/node`）
+**rc.8+ 核心会默认打开系统浏览器（桌面壳必须拦截）**：核心 0.1.0-rc.8 起 `web` 命令默认把 URL 交给系统浏览器（`dsh-web-app` 配置 `openBrowser` 默认 true，官方开关 `--no-open`）。桌面壳有自己的 frameless 窗口，`doSpawn()` 固定追加 `--no-open`——但**必须按核心版本门禁**（`supportsNoOpen()`）：老核心的 commander 严格解析、遇未知选项直接 `error: unknown option` 退出（实测 rc.7 即炸），所以 <0.1.0-rc.8 的核心绝不能传。比较版本时注意 semver 形态：`0.1.0` 正式版比所有 `0.1.0-rc.N` 都新，先比数字三元组、相同再比 rc 号。
 
-**macOS 大坑（为什么必须内置）**：从 Finder/Dock 启动的 mac app **没有用户 shell 的 PATH**（不是沙盒问题，是 LaunchServices 不给环境变量），`spawn("node")`/`spawn("npm")` 直接 ENOENT。**根治方案 = 把官方 Node 发行版（自带 npm）打包进 app**，运行时用绝对路径跑，完全不管用户装没装 node：
+### 1b. DSH 运行时 = Electron 内嵌 Node（ELECTRON_RUN_AS_NODE）
 
-- **获取**：`node scripts/fetch-node.js <os> <arch>`（os ∈ win/mac/linux，arch ∈ x64/arm64；默认当前平台）。下载官方发行版（默认 v24.19.0 LTS，`DSH_DESKTOP_NODE_VERSION` 覆盖；镜像默认 npmmirror → 回退 nodejs.org，`DSH_DESKTOP_NODE_MIRROR` 覆盖），解压到 `build/node/<os>-<arch>/`（`${os}` 用 electron-builder 的 win/mac/linux 命名）。幂等：本机可执行时**校验版本与目标一致才跳过**，不一致强制重下（防旧缓存被打进新包）；跨平台暂存的目录只看存在性。`npm run dist:*` 会自动先 fetch。
-- **内置 node 版本不能落后于 DSH 核心需求（1.2.0 首发的实测事故，必读）**：DSH rc.7 的 `dsh-session-persistence-jsonl` 直接 `import { createZstdDecompress, zstdCompress, … } from "node:zlib"`，zstd API 要 Node ≥22.15.0——内置 22.14.0 时 DSH **启动即炸**（`does not provide an export named 'createZstdDecompress'`），且内置 node 优先级最高，用户系统里再新的 node 也救不了。**升级内置版本时另注意：Node ≥24 官方不再发布 win-x86（32 位 Windows）发行版**，因此 Windows 只打 x64 包（ia32 相关脚本/构建目标已全部移除，别加回来）。
-- **分发**：`build.extraResources` 的 `{ from: "build/node/${os}-${arch}", to: "node" }` —— `${os}`/`${arch}` 宏按目标平台/架构展开，装到 app 的 `resources/node/`。CI 各 job 构建前先 fetch 对应架构（见 workflow）。
-- **运行时解析**（main.js）：
-  - `resolveNodeExecutable()` 优先级：**内置 node**（`<resources>/node/node.exe` 或 `bin/node`）→ 环境变量（`npm_node_execpath` / `DSH_DESKTOP_NODE`）→ 常见安装位置扫描（Homebrew/nvm/fnm/volta/asdf/mise）→ PATH(`"node"`)。
-  - **npm 不依赖 PATH**：内置时用 `node <resources>/node/[lib/]node_modules/npm/bin/npm-cli.js <args>` 跑 npm（`npmSpawn()`），Windows 也不用 cmd（顺带绕开 cmd 引号坑）；非内置回退 Windows `cmd /d /s /c npm`、unix 解析出的 npm。
-  - `childEnv()` 把内置 node 的 bin 目录 prepend 进 PATH，DSH 子进程也能找到 node/npm。
-- **开发时**（`npm start`）：`resourcesPath` 里没有内置 node → 走系统 node，行为不变。
-- 目录 `build/node/` 已 gitignore（每个架构 ~30MB 压缩 / ~100MB 解压，不入库）。
+**机制**：Electron 43 内嵌 Node 24.18——已满足 DSH 核心的 Node ≥22.15 需求（node:zlib zstd）。`dshRuntime()` 直接返回 `process.execPath`（Electron 二进制自身），spawn 时加环境变量 `ELECTRON_RUN_AS_NODE=1`，该进程就是**纯 Node**（Chromium 完全不初始化）——已实测用它完整拉起 DSH 核心（含 koffi/sharp/node-pty 原生模块）并 HTTP 200。`DSH_DESKTOP_NODE` / `npm_node_execpath` 可覆盖为真实 node 二进制（此时不加 flag）；`runtimeSupportsDsh()` 在 spawn 前校验内嵌 Node 版本，过低弹错误面板而不是让核心启动即炸（1.2.0 事故的正式护栏）。
+
+- **不要恢复内置 Node**（`fetch-node.js` / `build/node/` 已删除）：内置 Node 曾是 macOS 裸环境的兜底，现在 Electron 内嵌运行时天然免疫；省 ~30MB 安装包体积，且 Electron 升级即 Node 升级，消灭"内置 node 版本漂移"这类事故（1.2.0 的 zstd 事故就是内置 22.14 落后于核心需求）。
+- **代价（明确接受）**：DSH 的子进程（MCP 服务、`dsh plugin` 等）只能看到**用户 PATH** 里的 node/npm/pnpm（终端 Profile 合并已覆盖 GUI 裸环境）；一台完全没装 Node 的机器能跑 DSH 但跑不了 npx 系 MCP 服务。
+- **原生模块前提**：Electron 的 NODE_MODULE_VERSION 与官方 Node 不同，但 DSH 树的原生包全是 **NAPI**（ABI 跨运行时稳定）所以兼容——**往核心里引入 NAN 原生包会破坏此方案**（届时该包需针对 Electron 重建）。
+- 开发时（`npm start`）：`process.execPath` 就是 `node_modules/electron/dist/electron`，同一条路径，行为一致。
+- **spawn 参数固定带 `--expose-internals`（node 选项，非核心参数）**：核心 rc.7+ 的启动器在组合里没有 hmr 服务时会**无条件创建** `cordis-plugin-hmr`（用于监听 `cordis.patch.yml` 热重载），而 `Hmr` 构造函数硬性要求进程以 `node --expose-internals` 启动（`ctx.loader.internal` 只在该 flag 下存在）——没有它核心会启动后片刻崩死（rc.7 与 0.1.1-rc.2 全新 home 均实测复现，CLI 裸跑 `dsh web` 同样会炸，属核心侧问题）。该 flag 放在 `bin.js` **之前**、由 node 自己消费，永远到不了核心的 commander，**对新老核心都安全、无需版本门禁**（实测两版均完整启动 + HTTP 200）。
 
 ### 1c. 继承终端 Profile（MCP 修复，设置"继承终端 Profile"默认开）
 
 **问题**：从 Finder/Dock 启动的 mac app 没有用户 shell 的环境变量，DSH 继承的就是这个"裸"环境，DSH 拉起的 **MCP 服务**（npx/uvx/python 等子进程）找不到可执行文件，起不来。
 
-**机制（保证在 MCP 之前）**：桌面壳在主进程 **spawn DSH 之前**用 `execFileSync` 跑用户的登录+交互 shell（`<shell> -l -i -c env`，依次回退 `-l`、`-i`，8s 超时，`PS1=''` + 过滤 `KEY=VALUE` 行），把导出的环境变量解析出来，合并进 `childEnv()`。**合并语义 = 用户环境优先**：`childEnv()` 基底就是应用自身的 `process.env`（终端启动、`launchctl setenv`、LaunchAgent 注入的变量全都在，直接透传给 DSH/MCP）；Profile 只**补缺**（应用已有的 key 不被覆盖，避免 `.zshrc` 覆盖你在启动前 export 的值）；PATH 特殊处理——Profile 的 PATH **前置**（裸环境下 MCP 必须要用户 PATH），内置 node 的 bin 目录再 prepend 最前。DSH 是 MCP 的父进程 → MCP 一定在出生时就有终端环境。Windows 跳过（注册表环境已够用）。开关存 `update-settings.json` 的 `inheritTerminalProfile`（默认 true），桌面版设置页可关；`_terminalEnv` 缓存，切开关后置空、下次 DSH 重启生效（`restartDSH`/更新时）。
+**机制（保证在 MCP 之前）**：桌面壳在主进程 **spawn DSH 之前**用 `execFileSync` 跑用户的登录+交互 shell（`<shell> -l -i -c env`，依次回退 `-l`、`-i`，8s 超时，`PS1=''` + 过滤 `KEY=VALUE` 行），把导出的环境变量解析出来，合并进 `childEnv()`。**合并语义 = 用户环境优先**：`childEnv()` 基底就是应用自身的 `process.env`（终端启动、`launchctl setenv`、LaunchAgent 注入的变量全都在，直接透传给 DSH/MCP）；Profile 只**补缺**（应用已有的 key 不被覆盖，避免 `.zshrc` 覆盖你在启动前 export 的值）；PATH 特殊处理——Profile 的 PATH **前置**（裸环境下 MCP 必须要用户 PATH）。DSH 是 MCP 的父进程 → MCP 一定在出生时就有终端环境。Windows 跳过（注册表环境已够用）。开关存 `update-settings.json` 的 `inheritTerminalProfile`（默认 true），桌面版设置页可关；`_terminalEnv` 缓存，切开关后置空、下次 DSH 重启生效（`restartDSH`/更新时）。
 
 ### 2. 客户端插件挂载（`prepareDesktopPlugin` + `--patch`）
 
@@ -142,6 +143,7 @@ window.__ModuleLoader__.load({
 - **Session log 按钮搬进控制条**：DSH 头部原来在右上角的 "Session log" 按钮与控制条按钮相撞。**不再用任何"下移/左挤"方案**（`padding-right:150px`、整屏下移、整行/单按钮下移都已废弃——都会拉高头部或留下难看的空隙）。改为：① 在控制条里**最小化按钮左边**重做一个 `Session log` 胶囊按钮（`SessionLogButton`，`ctx.sessions.list.getSnapshot().current` 拿当前会话 id，复刻 `dsh-session-log-export` 的下载逻辑：`HEAD /api/session.export?sessionId=<id>&includeDescendants=true` 后触发浏览器下载）；② CSS `[data-dsh-desktop] [class*="sessionLogButton"]{display:none!important}` 隐藏 DSH 原按钮——**只限桌面**：`apply()` 检测到 Electron 桥（`window.dshDesktop`）时给 `<html>` 打 `data-dsh-desktop` 标记，普通浏览器不打标记、保留 DSH 原按钮（桌面壳拉起的同一个 DSH 实例被浏览器直接访问时，插件仍挂载，必须靠这个标记区分）。**会话头部完全保持原始布局**（crumbs/tabs 间距不变）。③ 按钮**只在有打开的、且已有对话内容的会话时显示**——`SessionLogButton` 订阅 `sessions.list`：`current` 有值 **且** 该会话 `summary.blank` 不为 true 才渲染（空白新会话——还没有任何对话内容——不显示，与 DSH 头部隐藏逻辑一致）；控制条用 `MutationObserver` 监听子节点变化，按钮出现/消失时重新测量拖拽区终点，避免拖拽区盖住按钮。
 - **拖拽区终点 = 按钮起点**：控制条 `left` 用 JS 量侧栏右缘，拖拽区 `right` 也用 JS 量最左按钮（Session log 胶囊宽度不固定，不能写死 132px）——`window.innerWidth - firstBtnRect.left`，随窗口缩放/侧栏变化同步。
 - **兜底控制条**：主进程在 DSH 页 `did-finish-load` 后延迟 1.5s/6s 用 `executeJavaScript` 检查 `.dsh-desktop-controls`；若插件没挂上（核心/插件加载失败），注入一套原生样式的 `.dsh-desktop-fallback` 按钮条（同样从侧栏右缘开始 + 拖拽条，最小化/最大化/关闭），保证 frameless 窗口永远可关。
+- **窗口按钮被右侧栏插件面板遮挡（大坑，实测 mac）**：插件控制条挂载在 `shell.overlay` 槽内，而 `[data-shell-overlay]` 宿主在 DSH 自己的叠层上下文里——右侧栏插件展开的面板一旦高于这个上下文，就把三个金刚按钮 + Session log 按钮盖住。修复：`WindowControls` 用 **`ReactDOM.createPortal(..., document.body)`** 渲染控制条（loader 的 staticModules 明确暴露 `react-dom`/`react-dom/client`，可直接 require），DOM 落在 body 层、`position:fixed` + 最大 z-index 赢过一切页面层，与 main.js 兜底条同层。**千万别手动 `appendChild` 把 React 管理的节点挪到 body**——那是偷走 React 的 DOM，槽位宿主下次渲染调和直接抛 `NotFoundError`，按钮全部失效（实测教训）；portal 才是官方逃生口（组件仍在槽的 React 树里、props/生命周期不变，只有 DOM 出口换了）。
 - **原生逃生通道**：菜单加 `CmdOrCtrl+M`（最小化）/ `CmdOrCtrl+W`（关闭窗口）；macOS 上 Cmd+Q 走系统 appMenu。即使页面 DOM 按钮全部失效也能关窗/退出。
 - **macOS 复制/粘贴/全选失效（大坑）**：frameless Electron 应用没有「编辑」菜单时，macOS 不把 Cmd+C/V/X/A 路由到页面。**修复**：`buildMenu()` 里加标准角色子菜单（`undo/redo/cut/copy/paste/selectAll`），Windows/Linux 也一并获得对应快捷键。
 
@@ -171,14 +173,14 @@ window.__ModuleLoader__.load({
 - 所有启动/崩溃/安装失败都走 splash 错误面板（`dsh:startupError` + `dsh:startupChoice`），**绝不弹原生模态框/系统崩溃弹窗**：面板渲染动态操作按钮（重试 / 换端口并重试 / 退出 / 安装失败时 重试·换镜像·用当前版本继续·退出），并可**一键「复制错误信息」**（`dsh:copyText` → 主进程 `clipboard`；内容=消息+详情+最近日志）。
 - **主进程崩溃可视化**：`process.on("uncaughtException")` + `process.on("unhandledRejection")` 兜底——任何未捕获 JS 错误/未处理 Promise 都转成页面错误面板，而不是 Windows "has stopped working" 系统弹窗（那种弹窗用户没法复制错误）。换端口写入 `update-settings.json` 的 `port`，`effectivePort()` 优先环境变量再读它。
 - **端口占用预检**：spawn 前 `isPortFree(effectivePort())`，被占就直接弹"端口已被占用"面板（而不是等 DSH 报错退出）；退出日志含 `EADDRINUSE` 也走换端口面板。
-- **安装进度**：`trackInstallProgress()` 每 1.5s 测 `dshDir()` 增长，按 `INSTALL_ESTIMATE_MB`（默认 250，可 `DSH_DESKTOP_INSTALL_ESTIMATE_MB` 覆盖）算百分比推到 splash 进度条（`dsh:progress`）。
+- **安装进度**：`trackInstallProgress()` 每 2s 经共享的**异步**测量器（`createSizeMeter`，进度条与看门狗共用，互不叠加遍历）测 `pnpm-store + dshDir()` 增长，按 `INSTALL_ESTIMATE_MB`（默认 250，可 `DSH_DESKTOP_INSTALL_ESTIMATE_MB` 覆盖）算百分比推到 splash 进度条（`dsh:progress`）。**不要改回同步 `dirSizeSync` 轮询**——3.3 万文件的树单次同步遍历 ~615ms，每 1.5s 一次曾把主进程约 40% 时间烧在重复 stat 上并和安装器抢磁盘 I/O；pnpm 的下载先落 store 再硬链进安装目录，所以两个目录都要测。
 - `did-fail-load`（非 file:、非 ERR_ABORTED）/ `render-process-gone` → 回退 splash 错误面板，绝不留"关不掉的死窗"。
 - **安装失败**（`installWithRetry`）同样用页面面板 + `pendingInstallCb`（重试/换镜像/用当前版本继续/退出），**不再用 `dialog.showMessageBoxSync`**——统一可复制的错误出口。更新时 `isUpdating` 标志让 DSH 被故意停掉时不误报"进程已退出"。
-- **下载黑洞节点（大坑，实测）**：镜像 CDN 的某个节点可能 **TCP 握手成功但永不传数据**（如广州移动 AS9808 节点），npm 挂着 13 条 Established 连接、CPU 狂转、字节却零流动——表现就是"点更新一直没下载、任务管理器没流量"。**四道防线**：① `childEnv` 设 `npm_config_fetch_timeout=30000` + `fetch_retries=3`，npm 30s 快速失败并重试（可能换到别的节点）；② 安装加 `--loglevel=info`，npm 下载时逐请求打印，用户能在日志看到活动、看门狗能识别"有进展"；③ `installDSH` 下载看门狗：dshDir 无增长**且** npm 无输出持续 `INSTALL_STALL_MS`（默认 120s，可 `DSH_DESKTOP_INSTALL_STALL_SECONDS` 覆盖）就 taskkill 整棵 npm 树并弹"下载无进展，请重试或换镜像"；④ 更新前也 `probeFastestRegistry` 探测镜像（原来只有首次安装探测）。
+- **下载黑洞节点（大坑，实测）**：镜像 CDN 的某个节点可能 **TCP 握手成功但永不传数据**（如广州移动 AS9808 节点），安装器挂着多条 Established 连接、CPU 狂转、字节却零流动——表现就是"点更新一直没下载、任务管理器没流量"。**四道防线**：① `childEnv` 设 `npm_config_fetch_timeout=120000` + `fetch_retries=3`（pnpm 同样读 `npm_config_*` 环境变量），2 分钟无数据快速失败并重试（可能换到别的节点）——**别改回 30s**：慢速但正常的网络下 30s 会掐断未回完的请求触发重试风暴，让"分析依赖"比终端 npm 慢好几倍；② 安装输出必须逐行可见（pnpm 走 `--reporter=append-only` 的 Progress 行；npm 回退走 `--loglevel=info`），用户能在日志看到活动、看门狗能识别"有进展"；③ `installDSH` 下载看门狗：**只在磁盘开始写入（`downloadStarted`）后才生效**——pnpm store + dshDir 无增长**且**安装器无输出持续 `INSTALL_STALL_MS`（默认 120s，可 `DSH_DESKTOP_INSTALL_STALL_SECONDS` 覆盖）就 taskkill 整棵安装器进程树并弹"下载无进展，请重试或换镜像"。**依赖解析阶段不打印日志也不写盘，看门狗绝不能杀它**（macOS GUI 启动无 shell 环境变量，该覆盖项在 mac 上设不了，默认必须安全）；④ 更新前也 `probeFastestRegistry` 探测镜像（原来只有首次安装探测）。
 
 ### 9. 更新安全（先停 DSH 再装，防崩溃）
 
-- **更新会崩的根因**：`npm install --prefix <托管目录>` 直接覆盖**正在运行**的 DSH 目录（`<userData>/dsh/node_modules/@deepseek-ai/dsh`）。Windows 下运行中进程文件被替换 → EPERM/EBUSY，npm 报错且 DSH 进程被删文件而崩。
+- **更新会崩的根因**：安装器直接覆盖**正在运行**的 DSH 目录（`<userData>/dsh/node_modules/@deepseek-ai/dsh`）。Windows 下运行中进程文件被替换 → EPERM/EBUSY，安装报错且 DSH 进程被删文件而崩。
 - **修复**：`updateDSH()` 先 `killDSH()` 停掉核心 → 回 splash → 安装（带进度条）→ `restartDSH()` 起新版本。失败时 `resolveDSHBin()` 回退旧版本/缓存，不会留死状态。**更新只重启核心，不需要重启整个 Electron 壳**。
 - 安装失败操作（重试 / 换镜像重试 / **用当前版本继续**（有旧版时）/ 退出）都在页面错误面板里，`pendingInstallCb` 保存续作回调。
 - 若更新过程仍异常，`dsh:installUpdate` 有 try/catch、主进程有全局 `uncaughtException`/`unhandledRejection` 兜底，都会把错误打到页面面板（可复制）而不是系统弹窗。
@@ -202,13 +204,13 @@ window.__ModuleLoader__.load({
 ```bash
 npm install          # 装依赖（首次）
 npm run icon         # 重新生成图标（改了鲸鱼配色/边距后）
-npm start            # 开发运行（frameless 窗口；用系统 node）
-npm run fetch:node   # 下载内置 Node（当前平台/架构）到 build/node/<os>-<arch>/
+npm start            # 开发运行（frameless 窗口）
 npm run fetch:market # 下载内置插件市场到 build/market-plugin/（dist:* 会自动跑）
-npm run pack         # 打包目录到 dist/win-unpacked/（会先 fetch market）
-npm run dist:win     # NSIS 安装包（会自动 fetch node）
-npm run dist:mac     # macOS dmg（会自动 fetch node）
-npm run dist:linux   # Linux AppImage（会自动 fetch node）
+npm run fetch:pnpm   # 下载内置 pnpm 到 build/pnpm/（dist:* 会自动跑；dev 下不跑则安装回退 npm）
+npm run pack         # 打包目录到 dist/win-unpacked/（会先 fetch market + pnpm）
+npm run dist:win     # NSIS 安装包
+npm run dist:mac     # macOS dmg
+npm run dist:linux   # Linux AppImage（会自动 fetch market + pnpm）
 ```
 
 **开发运行注意**：
@@ -252,15 +254,15 @@ npm run pack             # 打包目录
 |---|---|
 | `DSH_DESKTOP_PORT` | 指定端口（默认 3080） |
 | `DSH_DESKTOP_HOME` | 覆盖 DSH_HOME（默认 `~/.dsh`；调试隔离用，日常勿设） |
+| `DSH_DESKTOP_USER_DATA` | 覆盖整个 userData（托管安装/pnpm store/设置；与 `DSH_DESKTOP_HOME`+`DSH_DESKTOP_PORT` 组合可完整模拟新用户首启，单实例锁也随 userData 隔离） |
 | `DSH_DESKTOP_NPM_REGISTRY` | npm 镜像（默认 npmmirror，国内网络需要） |
 | `DSH_DESKTOP_NPM_CACHE` | npm 缓存目录 |
 | `DSH_DESKTOP_SPEC` | DSH npm 规格（默认 `@deepseek-ai/dsh@latest`） |
-| `DSH_DESKTOP_TIMEOUT` | 启动看门狗超时秒数（默认 720s） |
+| `DSH_DESKTOP_TIMEOUT` | 启动看门狗超时秒数（默认 1800s） |
 | `DSH_DESKTOP_INSTALL_ESTIMATE_MB` | 安装进度条估算总大小（默认 250MB） |
 | `DSH_DESKTOP_INSTALL_STALL_SECONDS` | 下载无进展判定秒数（默认 120s，超时 kill npm） |
 | `DSH_DESKTOP_SHELL_REPO` | 壳自更新的 GitHub 仓库（默认 `MoonlitDropOfBlood/DSH-Desktop`） |
-| `DSH_DESKTOP_NODE` | 覆盖要 spawn 的 node 可执行文件绝对路径（默认内置 node，其次系统） |
-| `DSH_DESKTOP_NPM` | 覆盖要 spawn 的 npm 可执行文件绝对路径（仅非内置回退时用） |
-| `DSH_DESKTOP_NODE_VERSION` | `scripts/fetch-node.js` 下载的 node 版本（默认 24.19.0 LTS） |
-| `DSH_DESKTOP_NODE_MIRROR` | 内置 node 下载镜像（默认 npmmirror，回退 nodejs.org） |
+| `DSH_DESKTOP_NODE` | 用真实的 Node 二进制覆盖 DSH 运行时（默认用 Electron 内嵌 Node + `ELECTRON_RUN_AS_NODE`；调试用） |
+| `DSH_DESKTOP_NPM` | 覆盖 npm 回退路径要 spawn 的 npm 可执行文件绝对路径（仅 pnpm 缺失的回退时用） |
 | `DSH_DESKTOP_MARKET_VERSION` | `scripts/fetch-market-plugin.js` 下载的 dshmarket 版本（默认 1.15.0） |
+| `DSH_DESKTOP_PNPM_VERSION` | `scripts/fetch-pnpm.js` 下载的内置 pnpm 版本（默认 10.33.0） |

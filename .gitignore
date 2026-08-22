@@ -8,5 +8,6 @@ release/
 build/node/
 build/.node-tmp-*/
 build/market-plugin/
+build/pnpm/
 *.log
 *.tgz

@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		const React = require("react");
+		const ReactDOM = require("react-dom");
 		const ui = require("@deepseek-ai/dsh-client-ui-primitives");
 		const Button = ui.Button;
 		const Toast = ui.Toast;
@@ -283,15 +284,30 @@ window.__ModuleLoader__.load({
 			// SIDEBAR stays flush to the top and untouched; the session header is
 			// left in its natural layout (the original Session log button is
 			// hidden via CSS).
-			return React.createElement(
-				"div",
-				{ ref: controlsRef, className: "dsh-desktop-controls", role: "group", "aria-label": "窗口控制" },
-				React.createElement("div", { className: "dsh-desktop-drag-side" }),
-				React.createElement("div", { className: "dsh-desktop-drag" }),
-				React.createElement(SessionLogButton, { sessions: props && props.sessions }),
-				React.createElement(WindowBtn, { kind: "minimize", title: "最小化" }),
-				React.createElement(WindowBtn, { kind: "toggleMaximize", title: "最大化 / 还原" }),
-				React.createElement(WindowBtn, { kind: "close", title: "关闭" })
+			//
+			// LAYER: rendered via ReactDOM.createPortal into document.body, NOT
+			// inside the shell.overlay slot host. The slot host lives in DSH's
+			// own stacking context, and a right-sidebar plugin's expanded panel
+			// can exceed that context and paint over (or block clicks on) the
+			// window buttons. A portal is React's official escape hatch — the
+			// strip stays in the slot's React tree (props/lifecycle intact) but
+			// its DOM lives at body level where position:fixed + max z-index win
+			// over every page layer. (An earlier manual
+			// document.body.appendChild(host) was WRONG: it stole a React-managed
+			// DOM node, so the slot's next render crashed reconciliation and the
+			// buttons went dead — never reparent a React-owned node by hand.)
+			return ReactDOM.createPortal(
+				React.createElement(
+					"div",
+					{ ref: controlsRef, className: "dsh-desktop-controls", role: "group", "aria-label": "窗口控制" },
+					React.createElement("div", { className: "dsh-desktop-drag-side" }),
+					React.createElement("div", { className: "dsh-desktop-drag" }),
+					React.createElement(SessionLogButton, { sessions: props && props.sessions }),
+					React.createElement(WindowBtn, { kind: "minimize", title: "最小化" }),
+					React.createElement(WindowBtn, { kind: "toggleMaximize", title: "最大化 / 还原" }),
+					React.createElement(WindowBtn, { kind: "close", title: "关闭" })
+				),
+				document.body
 			);
 		}
 
@@ -555,6 +571,12 @@ window.__ModuleLoader__.load({
    top) and its drag region ends where the buttons begin (right is also measured,
    because the Session log capsule is variable-width).
 
+   LAYER: the strip renders through a ReactDOM.createPortal into document.body
+   (see WindowControls) — a right-sidebar plugin's expanded panel can otherwise
+   exceed the shell.overlay slot host's stacking context and cover the buttons
+   (measured on macOS). position:fixed + max z-index at body level then wins
+   over every DSH stacking context, exactly like the main.js fallback strip.
+
    Click-through: the CONTAINER is pointer-events:none, so the strip never
    swallows clicks meant for the session header/sidebar below; only the real
    controls (buttons, capsule, drag strips) re-enable hit-testing. The drag
@@ -575,7 +597,7 @@ window.__ModuleLoader__.load({
 .dsh-desktop-controls {
   position: fixed; top: 0; left: 0; right: 0; height: 36px;
   display: flex; align-items: stretch; justify-content: flex-end;
-  z-index: 2147483000; pointer-events: none; user-select: none;
+  z-index: 2147483647; pointer-events: none; user-select: none;
 }
 .dsh-desktop-controls .dsh-desktop-drag {
   position: absolute; top: 0; left: 0; right: 132px; height: 12px;

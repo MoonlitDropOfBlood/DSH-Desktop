@@ -5,22 +5,31 @@
  * ------------------------
  * A thin Electron shell (published to GitHub) that does NOT bundle the DSH
  * core. DSH is installed on the target machine into the app's user-data
- * directory via `npm install` (reliable here — unlike npx, which stalls on
- * this network), and launched directly with `node`. An update check on start
- * + a "检查更新" menu keeps DSH up to date (npm view + npm install).
+ * directory via the bundled pnpm (npm fallback), and launched under the
+ * Electron-embedded Node runtime (ELECTRON_RUN_AS_NODE). An update check on
+ * start + a "检查更新" menu keeps DSH up to date (registry HTTP version
+ * query + pnpm add).
+ *
+ * Why pnpm for the managed install: the DSH core tree is ~195 interdependent
+ * @deepseek-ai/* packages (plus react peerDeps), and this shell always
+ * installs `@latest` into a bare prefix — no lockfile, so npm's arborist
+ * re-resolves the WHOLE tree from scratch every time. Measured on this tree:
+ * npm resolution ALONE burns >10 min of single-threaded CPU (placeDep goes
+ * superlinear); pnpm resolves + downloads + links the same tree in ~18 s.
  *
  * Flow:
  *   1. resolve the newest available DSH (user-data dir, then any complete
- *      local install such as the npm _npx cache), installing via npm when
- *      none exists (with a determinate progress bar on the splash),
+ *      local install such as the npm _npx cache), installing via the bundled
+ *      installer when none exists (with a determinate progress bar),
  *   2. pre-check the port; on conflict offer a change-port panel,
- *   3. spawn `node <dsh>/lib/bin.js web` (default port 3080),
+ *   3. spawn the core under the embedded Node runtime (`ELECTRON_RUN_AS_NODE`,
+ *      default port 3080),
  *   4. stream install/DSH output into the splash so progress is visible,
  *      route every startup/crash failure to the splash error panel (retry /
  *      change port / quit) instead of a bare system popup,
  *   5. kill the whole DSH tree on quit, offer restart on crash, and a
  *      watchdog that reports a stalled startup instead of hanging silently.
- * Updates stop the DSH core before installing (npm replacing files under a
+ * Updates stop the DSH core before installing (replacing files under a
  * running core crashed on Windows), then restart the core with the new version.
  */
 
@@ -47,16 +56,16 @@ const FALLBACK_REGISTRIES = [
   "https://registry.npmmirror.com",
   "https://registry.npmjs.org"
 ];
-/** Number of 500 ms polls (10 minutes) before we declare the server unreachable. */
-const MAX_WAIT_POLLS = 1200;
-/** Watchdog: if DSH (including a first-time npm install) is not up within this, act. */
-const DEFAULT_STARTUP_TIMEOUT = 12 * 60 * 1000;
+/** Number of 500 ms polls (30 minutes) before we declare the server unreachable. */
+const MAX_WAIT_POLLS = 3600;
+/** Watchdog: if DSH (including a first-time install) is not up within this, act. */
+const DEFAULT_STARTUP_TIMEOUT = 30 * 60 * 1000;
 /** Rough first-install size used to render a determinate download progress bar. */
 const INSTALL_ESTIMATE_MB = (() => {
   const n = Number(process.env.DSH_DESKTOP_INSTALL_ESTIMATE_MB);
   return Number.isFinite(n) && n > 0 ? n : 250;
 })();
-/** If an npm install makes no progress (no extraction & no output) this long, kill it. */
+/** If an install makes no progress (no extraction & no output) this long, kill it. */
 const INSTALL_STALL_MS = (() => {
   const s = Number(process.env.DSH_DESKTOP_INSTALL_STALL_SECONDS);
   return Number.isFinite(s) && s > 0 ? s * 1000 : 120 * 1000;
@@ -73,6 +82,19 @@ let isQuitting = false;
 const logTail = [];
 
 // ---- single instance ------------------------------------------------------
+// Debug/testing hook: DSH_DESKTOP_USER_DATA redirects the ENTIRE userData dir
+// (managed DSH install, pnpm store, settings, generated patch). Combined with
+// DSH_DESKTOP_HOME + DSH_DESKTOP_PORT it gives a completely isolated
+// first-run environment — the single-instance lock is keyed by userData, so a
+// redirected instance runs beside the real one. Must run BEFORE the lock
+// request and any app.getPath("userData") read.
+if (process.env.DSH_DESKTOP_USER_DATA) {
+  try {
+    fs.mkdirSync(process.env.DSH_DESKTOP_USER_DATA, { recursive: true });
+    app.setPath("userData", process.env.DSH_DESKTOP_USER_DATA);
+  } catch { /* bad path → keep the default */ }
+}
+
 // The desktop app does not support multiple instances. `app.quit()` alone is
 // NOT enough: whenReady() still fires before the quit takes effect and would
 // open a second window + spawn a second DSH (which then fails on the port).
@@ -194,43 +216,92 @@ function suggestFreePort(from) {
   });
 }
 
-/** Recursive directory size in bytes (best-effort). */
-function dirSizeSync(dir) {
+/**
+ * Async recursive directory size in bytes. The managed tree reaches ~33k
+ * files (≈615 ms for one SYNCHRONOUS walk) — doing that synchronously every
+ * 1.5 s blocked the Electron main process and fought the installer's own
+ * disk I/O. This walker yields on every call, so the UI stays responsive.
+ */
+function dirSize(dir, cb) {
   let total = 0;
-  try {
-    const walk = (p) => {
-      for (const ent of fs.readdirSync(p, { withFileTypes: true })) {
+  const walk = (p, done) => {
+    fs.readdir(p, { withFileTypes: true }, (err, ents) => {
+      if (err) return done(); // transient races / missing dir → partial total
+      let i = 0;
+      const next = () => {
+        if (i >= ents.length) return done();
+        const ent = ents[i++];
         const fp = path.join(p, ent.name);
-        if (ent.isDirectory()) walk(fp);
-        else if (ent.isFile()) total += fs.statSync(fp).size;
-      }
-    };
-    if (fs.existsSync(dir)) walk(dir);
-  } catch {
-    /* ignore transient races */
-  }
-  return total;
+        if (ent.isDirectory()) return walk(fp, next);
+        if (ent.isFile()) return fs.stat(fp, (e, st) => { if (!e) total += st.size; next(); });
+        next();
+      };
+      next();
+    });
+  };
+  walk(dir, () => cb(total));
 }
 
 /**
- * While an npm install runs, poll the managed install dir growth and push a
- * determinate progress to the splash. Returns a stop(done) function.
+ * Shared async size measurer over a set of dirs (install dir + pnpm store).
+ * Polls that fire while a walk is in flight are QUEUED onto that walk's
+ * completion (never answered with a stale value, never stacking walks) — the
+ * progress baseline and the watchdog's first sample must both come from a
+ * real measurement, not from the primed zero.
  */
-function trackInstallProgress() {
+function createSizeMeter(dirs) {
+  let last = 0;
+  let running = false;
+  const waiters = [];
+  const measure = (cb) => {
+    if (cb) waiters.push(cb);
+    if (running) return;
+    running = true;
+    let i = 0;
+    let sum = 0;
+    const next = () => {
+      if (i >= dirs.length) {
+        last = sum;
+        running = false;
+        const w = waiters.splice(0);
+        for (const fn of w) { try { fn(sum); } catch { /* listener errors are non-fatal */ } }
+        return;
+      }
+      dirSize(dirs[i++], (s) => { sum += s; next(); });
+    };
+    next();
+  };
+  // Prime `last` so current() is meaningful before the first poll finishes.
+  measure();
+  return { measure, current: () => last };
+}
+
+/**
+ * While an install runs, poll the shared size meter and push a determinate
+ * progress to the splash. Returns a stop(done) function. Downloads land in
+ * the pnpm store FIRST and only then link into the install dir, so the meter
+ * must cover both dirs for continuous progress (with the npm fallback the
+ * store dir simply never grows).
+ */
+function trackInstallProgress(meter) {
   const estimateBytes = INSTALL_ESTIMATE_MB * 1024 * 1024;
-  const baseline = dirSizeSync(dshDir());
+  let baseline = null;
   let timer = null;
+  meter.measure((s) => { baseline = s; });
   const poll = () => {
-    const delta = Math.max(0, dirSizeSync(dshDir()) - baseline);
-    const percent = Math.min(99, Math.round((delta / estimateBytes) * 100));
-    sendProgress({
-      phase: "download",
-      downloadedMB: delta / 1024 / 1024,
-      percent,
-      totalMB: estimateBytes / 1024 / 1024
+    if (baseline === null) return;
+    meter.measure((sz) => {
+      const delta = Math.max(0, sz - baseline);
+      const percent = Math.min(99, Math.round((delta / estimateBytes) * 100));
+      sendProgress({
+        phase: "download",
+        downloadedMB: delta / 1024 / 1024,
+        percent,
+        totalMB: estimateBytes / 1024 / 1024
+      });
     });
   };
-  timer = setInterval(poll, 1500);
+  timer = setInterval(poll, 2000);
   poll();
   return (done) => {
     if (timer) clearInterval(timer);
@@ -412,128 +483,90 @@ function probeFastestRegistry(cb) {
   setTimeout(() => { if (!chosen) finish(currentRegistry); }, 10000);
 }
 
-// ---- bundled Node.js (extraResources → <resources>/node) -------------------
-// The shell bundles an official Node distribution (with npm) via
-// electron-builder extraResources, so node/npm are available even when the app
-// is launched from Finder/Dock on macOS — which gives the app NO user shell
-// PATH (the classic "cannot find node" failure). In dev (`npm start`) the
-// bundled dir is absent and we fall back to the system node.
-function bundledNodeDir() {
-  try {
-    const dir = path.join(process.resourcesPath, "node");
-    return fs.existsSync(dir) ? dir : null;
-  } catch {
-    return null;
+// ---- DSH runtime: the Electron-embedded Node (no bundled Node) -------------
+// Since Electron 43 the shell's own process IS Node 24 — spawning the Electron
+// binary with ELECTRON_RUN_AS_NODE=1 runs it as PLAIN Node (Chromium never
+// initializes), verified end-to-end booting the full DSH core including its
+// NAPI native modules (koffi/sharp/node-pty). This replaced the bundled Node
+// distribution (scripts/fetch-node.js + extraResources, ~100 MB per installer
+// and ~30 MB compressed): one runtime to maintain, and no pinned-Node version
+// drift like the 1.2.0 incident (bundled 22.14 lacked the node:zlib zstd APIs
+// DSH rc.7 imports — the embedded runtime now tracks Electron's Node).
+//
+// Trade-off accepted: DSH's child processes (MCP servers, `dsh plugin`) see
+// whatever node/npm/pnpm the USER's PATH provides (the terminal-profile merge
+// below covers bare GUI launches); a machine with no user-installed Node runs
+// DSH fine but cannot run npx-based MCP servers.
+
+/**
+ * The runtime that executes the DSH core and the installer.
+ * Returns `{ command, runAsNode }`: normally the Electron binary ITSELF
+ * (spawn with env ELECTRON_RUN_AS_NODE=1); DSH_DESKTOP_NODE /
+ * npm_node_execpath override with a REAL node binary (no flag then).
+ */
+function dshRuntime() {
+  const override = process.env.DSH_DESKTOP_NODE || process.env.npm_node_execpath;
+  if (override) {
+    try { if (fs.existsSync(override)) return { command: override, runAsNode: false }; } catch { /* fall through */ }
   }
-}
-
-function bundledNodeBin() {
-  const dir = bundledNodeDir();
-  if (!dir) return null;
-  const bin = process.platform === "win32"
-    ? path.join(dir, "node.exe")
-    : path.join(dir, "bin", "node");
-  try { return fs.existsSync(bin) ? bin : null; } catch { return null; }
-}
-
-function bundledNpmCli() {
-  const dir = bundledNodeDir();
-  if (!dir) return null;
-  const cli = process.platform === "win32"
-    ? path.join(dir, "node_modules", "npm", "bin", "npm-cli.js")
-    : path.join(dir, "lib", "node_modules", "npm", "bin", "npm-cli.js");
-  try { return fs.existsSync(cli) ? cli : null; } catch { return null; }
-}
-
-let _resolvedNode = null;
-let _resolvedNpm = null;
-
-/** Best-effort scan of well-known node install locations (macOS/Linux), used
- *  when there is no bundled node and no PATH entry. */
-function findNodeBinary() {
-  const home = process.env.HOME || "";
-  const staticDirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/opt/local/bin"];
-  if (home) staticDirs.push(`${home}/.local/bin`, `${home}/.volta/bin`, `${home}/.fnm/aliases/default/bin`);
-  for (const dir of staticDirs) {
-    try { if (fs.existsSync(path.join(dir, "node"))) return path.join(dir, "node"); } catch { /* skip */ }
-  }
-  const roots = [];
-  if (home) {
-    roots.push(`${home}/.nvm/versions/node`);                                   // nvm
-    roots.push(`${home}/.asdf/installs/nodejs`);                                // asdf
-    roots.push(`${home}/.local/share/mise/installs/node`);                      // mise
-    roots.push(`${home}/.local/share/fnm/node-versions`);                       // fnm (linux)
-    roots.push(`${home}/Library/Application Support/fnm/node-versions`);        // fnm (macOS)
-  }
-  const parseVer = (s) => { const m = String(s).match(/v?(\d+)\.(\d+)\.(\d+)/); return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0]; };
-  const cmpVer = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-  let best = null;
-  let bestV = null;
-  for (const root of roots) {
-    let kids = [];
-    try { kids = fs.readdirSync(root); } catch { continue; }
-    for (const kid of kids) {
-      const candidates = [path.join(root, kid, "bin", "node"), path.join(root, kid, "installation", "bin", "node")];
-      const bin = candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } });
-      if (!bin) continue;
-      const v = parseVer(kid);
-      if (!bestV || cmpVer(v, bestV) > 0) { bestV = v; best = bin; }
-    }
-  }
-  return best;
-}
-
-/** Resolve the node binary to spawn. Priority: bundled → env override →
- *  well-known locations → PATH ("node"). */
-function resolveNodeExecutable() {
-  if (_resolvedNode) return _resolvedNode;
-  const bundled = bundledNodeBin();
-  if (bundled) return (_resolvedNode = bundled);
-  const envNode = process.env.npm_node_execpath || process.env.DSH_DESKTOP_NODE;
-  if (envNode) { try { if (fs.existsSync(envNode)) return (_resolvedNode = envNode); } catch {} }
-  const found = findNodeBinary();
-  if (found) return (_resolvedNode = found);
-  return (_resolvedNode = "node");
-}
-
-/** Resolve a bare npm executable (PATH / next to the resolved node). */
-function resolveNpmExecutable() {
-  if (_resolvedNpm) return _resolvedNpm;
-  const envNpm = process.env.DSH_DESKTOP_NPM;
-  if (envNpm) { try { if (fs.existsSync(envNpm)) return (_resolvedNpm = envNpm); } catch {} }
-  if (process.platform !== "win32") {
-    const node = resolveNodeExecutable();
-    if (node !== "node" && path.isAbsolute(node)) {
-      const sibling = path.join(path.dirname(node), "npm");
-      try { if (fs.existsSync(sibling)) return (_resolvedNpm = sibling); } catch {}
-    }
-  }
-  return (_resolvedNpm = "npm");
+  return { command: process.execPath, runAsNode: true };
 }
 
 /**
- * How to run npm for this environment. Returns `{ command, args }`.
- * Bundled build: run npm through the bundled node (`node <npm-cli.js> …`) so
- * nothing depends on PATH. Windows fallback keeps the proven
- * `cmd /d /s /c npm` form; unix fallback uses the resolved npm executable.
+ * DSH core needs Node >= 22.15 (node:zlib zstd APIs). With the Electron
+ * runtime that is a property of the shell build; a real-node override
+ * bypasses the check (the override binary's own version then governs).
+ */
+function runtimeSupportsDsh() {
+  if (process.env.DSH_DESKTOP_NODE || process.env.npm_node_execpath) return true;
+  const m = String(process.versions.node || "").match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return false;
+  const [maj, min] = [Number(m[1]), Number(m[2])];
+  return maj > 22 || (maj === 22 && min >= 15);
+}
+
+// ---- bundled pnpm (extraResources → <resources>/pnpm) ----------------------
+// The installer for the managed DSH core. pnpm is platform-independent JS
+// (scripts/fetch-pnpm.js stages the pinned npm package into build/pnpm), so
+// one staged copy serves every os/arch. Resolution is WHY pnpm: npm's
+// arborist goes superlinear on the ~195 interdependent @deepseek-ai/*
+// packages of a bare-prefix `@latest` install (>10 min of CPU-bound
+// placeDep, measured); pnpm does the same tree in seconds.
+function bundledPnpmCli() {
+  try {
+    const cli = path.join(process.resourcesPath, "pnpm", "bin", "pnpm.cjs");
+    return fs.existsSync(cli) ? cli : null;
+  } catch { return null; }
+}
+
+/** Dev (`npm start`) source of pnpm after `npm run fetch:pnpm`. */
+function devPnpmCli() {
+  try {
+    const cli = path.join(__dirname, "build", "pnpm", "node_modules", "pnpm", "bin", "pnpm.cjs");
+    return fs.existsSync(cli) ? cli : null;
+  } catch { return null; }
+}
+
+function resolvePnpmCli() {
+  return bundledPnpmCli() || devPnpmCli();
+}
+
+/**
+ * How to run npm for the FALLBACK install path (used only when pnpm was not
+ * bundled/fetched). npm itself is never bundled — Windows keeps the proven
+ * `cmd /d /s /c npm` form; unix uses DSH_DESKTOP_NPM or PATH's npm. Every
+ * argument stays a SEPARATE argv entry (Windows quoting trap — see the
+ * runInstaller comment).
  */
 function npmSpawn(commandArgs) {
-  const bundledNode = bundledNodeBin();
-  const npmCli = bundledNpmCli();
-  if (bundledNode && npmCli) {
-    return { command: bundledNode, args: [npmCli, ...commandArgs] };
-  }
   if (process.platform === "win32") {
     return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", "npm", ...commandArgs] };
   }
-  return { command: resolveNpmExecutable(), args: commandArgs };
-}
-
-/** Prepend `dir` to PATH in `env` (case-insensitive key lookup on Windows). */
-function prependPath(env, dir) {
-  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH");
-  if (key) env[key] = dir + (env[key] ? path.delimiter + env[key] : "");
-  else env.PATH = dir;
+  const envNpm = process.env.DSH_DESKTOP_NPM;
+  if (envNpm) {
+    try { if (fs.existsSync(envNpm)) return { command: envNpm, args: commandArgs }; } catch { /* fall through */ }
+  }
+  return { command: "npm", args: commandArgs };
 }
 
 // ---- inherit the user's terminal profile (macOS/Linux MCP fix) -------------
@@ -626,20 +659,17 @@ function childEnv() {
   }
   env.npm_config_registry = resolveNpmRegistry();
   // Fail fast on blackholed CDN connections instead of npm stalling silently
-  // for many minutes (a CDN node can accept TCP but never send data).
-  env.npm_config_fetch_timeout = "30000";
+  // for many minutes (a CDN node can accept TCP but never send data). 120s per
+  // request still catches a dead node within ~2 min, while remaining generous
+  // enough that a slow-but-alive network (npm's own default is 5 min) does not
+  // abort healthy requests and then burn time on retries — which made
+  // dependency analysis far slower than a plain terminal `npm install`.
+  env.npm_config_fetch_timeout = "120000";
   env.npm_config_fetch_retries = "3";
   env.npm_config_fetch_retry_mintimeout = "2000";
   env.npm_config_fetch_retry_maxtimeout = "10000";
   if (process.env.DSH_DESKTOP_HOME) env.DSH_HOME = process.env.DSH_DESKTOP_HOME;
   if (process.env.DSH_DESKTOP_NPM_CACHE) env.npm_config_cache = process.env.DSH_DESKTOP_NPM_CACHE;
-  // Make the bundled node visible to the spawned DSH (and any node/npm it
-  // starts) even without a user shell PATH. Prepend LAST so bundled node/npm
-  // win over the shell's own node.
-  const node = resolveNodeExecutable();
-  if (node !== "node" && path.isAbsolute(node)) {
-    prependPath(env, path.dirname(node));
-  }
   // Task-notify bridge credentials: only the spawned DSH process receives them,
   // so its host-half plugin can authenticate to the local bridge.
   if (notifyToken) env.DSH_DESKTOP_NOTIFY_TOKEN = notifyToken;
@@ -650,6 +680,92 @@ function childEnv() {
 /** Managed DSH install location (outside the packaged app): <userData>/dsh. */
 function dshDir() {
   return path.join(app.getPath("userData"), "dsh");
+}
+
+/**
+ * Content-addressed pnpm store for the managed install: <userData>/pnpm-store.
+ * Deliberately inside userData so it is ALWAYS on the same volume as dshDir()
+ * (pnpm hard-links store → install dir; cross-volume linking fails or silently
+ * degrades to full copies).
+ */
+function pnpmStoreDir() {
+  return path.join(app.getPath("userData"), "pnpm-store");
+}
+
+/**
+ * Prepare the shell-owned managed dir for `pnpm add`:
+ *  1. materialize a minimal package.json when absent (pnpm add requires one;
+ *     a pnpm-managed install then keeps its own pnpm-lock.yaml across updates);
+ *  2. purge a FOREIGN node_modules left by the npm era (no .modules.yaml).
+ *     pnpm only replaces the packages it manages — stale npm-era top-level
+ *     copies would linger as dead weight (~210 MB), and removing the whole
+ *     tree first makes the result deterministic. Cost is small: with the
+ *     shared pnpm store already populated, the relink takes seconds.
+ * NOTE: react-dom peer noise — @tanstack/react-virtual's wide peer range
+ * makes pnpm pick the newest react-dom (19.x) next to react 18, printing an
+ * "unmet peer" warning. It is INERT here (the web client ships prebuilt
+ * bundles; nothing server-side loads react-dom) and a pnpm override cannot
+ * fix it declaratively ($react requires react as a DIRECT dep) — so we log
+ * and tolerate it, exactly as the npm era tolerated its own peer quirks.
+ */
+function prepareManagedDir() {
+  try {
+    fs.mkdirSync(dshDir(), { recursive: true });
+    const nm = path.join(dshDir(), "node_modules");
+    if (fs.existsSync(nm) && !fs.existsSync(path.join(nm, ".modules.yaml"))) {
+      log("removing foreign (npm-era) node_modules before pnpm install");
+      fs.rmSync(nm, { recursive: true, force: true });
+    }
+    // An npm-era package-lock.json is meaningless to pnpm — drop it.
+    try { fs.rmSync(path.join(dshDir(), "package-lock.json"), { force: true }); } catch { /* ignore */ }
+    const pj = path.join(dshDir(), "package.json");
+    if (!fs.existsSync(pj)) {
+      fs.writeFileSync(pj, JSON.stringify({ name: "dsh-managed", private: true }, null, 2) + "\n", "utf8");
+    }
+  } catch (err) {
+    log(`prepareManagedDir failed: ${err.message}`);
+  }
+}
+
+/**
+ * Build the install command for the managed dir. Preferred: bundled pnpm
+ * running under the SAME runtime as the core (dshRuntime — Electron's Node
+ * via ELECTRON_RUN_AS_NODE; nothing depends on PATH). Fallback: the previous
+ * npm command line when pnpm was not bundled/fetched.
+ * Every argument stays a SEPARATE argv entry (Windows quoting trap — see the
+ * runInstaller comment).
+ */
+function installPlan() {
+  const pnpmCli = resolvePnpmCli();
+  if (pnpmCli) {
+    const runtime = dshRuntime();
+    return {
+      installer: "pnpm",
+      command: runtime.command,
+      runAsNode: runtime.runAsNode,
+      args: [
+        pnpmCli, "add",
+        "--dir", dshDir(),
+        "--store-dir", pnpmStoreDir(),
+        // Line-per-line progress parseable by both the splash log and the
+        // stall watchdog (the default TTY renderer emits escape sequences).
+        "--reporter=append-only",
+        // An existing managed dir may hold a FOREIGN (npm-installed)
+        // node_modules; pnpm must purge it WITHOUT an interactive prompt
+        // (the splash has no TTY, a prompt would hang the install forever).
+        "--config.confirmModulesPurge=false",
+        DSH_SPEC
+      ]
+    };
+  }
+  // NOTE: pass the prefix path RAW (no JSON.stringify) — npmSpawn hands each
+  // arg to spawn separately and Node quotes paths with spaces correctly.
+  // --loglevel=info makes npm print per-request lines while downloading, so
+  // the stall watchdog sees real activity (and the user sees it downloading).
+  const plan = npmSpawn(["install", "--prefix", dshDir(), "--no-save", "--no-audit", "--no-fund", "--loglevel=info", DSH_SPEC]);
+  plan.installer = "npm";
+  plan.runAsNode = false;
+  return plan;
 }
 
 /**
@@ -709,25 +825,50 @@ function readInstalledVersion() {
 }
 
 /**
- * Spawn npm with live output streaming; onExit(code, stderrTail). Returns
- * `{ child, lastOutputMs }` so callers can kill a stalled install.
- *
- * Windows quoting trap (fixed): never pre-join the npm command into one string
- * like `npm install --prefix "C:\...\dsh" ...` and hand it to `cmd /s /c` —
- * cmd's /s quote-stripping mangles the embedded quotes and splits arguments at
- * spaces, so npm receives a RELATIVE `--prefix "C:\...\DeepSeek` and fails with
- * ENOENT mkdir. Instead pass `npm` and every argument as SEPARATE argv entries
- * and let Node's CreateProcess quoting handle paths with spaces.
+ * True when the resolved core understands the web command's `--no-open` flag.
+ * `dsh web` gained a default-browser handoff in core 0.1.0-rc.8 (with this
+ * flag to suppress it); the desktop renders the UI in its own frameless
+ * window, so the handoff is pure noise. The flag MUST be gated on the core
+ * version: older cores parse with strict commander (`program.parse` without
+ * allowUnknownOption), so an unknown `--no-open` would ABORT their startup.
+ * Version shape note: a final `0.1.0` (no rc suffix) is NEWER than every
+ * `0.1.0-rc.N`, so compare the numeric triple first and only then the rc.
  */
-function runNpm(args, cwd, onExit) {
+function supportsNoOpen(base) {
+  try {
+    const json = JSON.parse(fs.readFileSync(path.join(base, "package.json"), "utf8"));
+    const m = String(json.version || "").match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/);
+    if (!m) return false;
+    const cmp = compareVersions(`${m[1]}.${m[2]}.${m[3]}`, "0.1.0");
+    if (cmp !== 0) return cmp > 0;
+    return m[4] === undefined || Number(m[4]) >= 8;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Spawn the installer (pnpm, or npm as fallback) with live output streaming;
+ * onExit(code, stderrTail). Returns `{ child, lastOutputMs }` so callers can
+ * kill a stalled install.
+ *
+ * Windows quoting trap (fixed): never pre-join the install command into one
+ * string like `npm install --prefix "C:\...\dsh" ...` and hand it to
+ * `cmd /s /c` — cmd's /s quote-stripping mangles the embedded quotes and
+ * splits arguments at spaces, so npm receives a RELATIVE
+ * `--prefix "C:\...\DeepSeek` and fails with ENOENT mkdir. Instead the plan
+ * carries the executable and every argument as SEPARATE argv entries and
+ * Node's CreateProcess quoting handles paths with spaces.
+ */
+function runInstaller(plan, cwd, onExit) {
   const env = childEnv();
+  // Electron-as-node: the Electron binary behaves as plain Node only under
+  // this env flag (harmless to any descendant that is not the Electron binary).
+  if (plan.runAsNode) env.ELECTRON_RUN_AS_NODE = "1";
   let errBuf = "";
   const tracker = { child: null, lastOutputMs: Date.now() };
   const onData = () => { tracker.lastOutputMs = Date.now(); };
-  // Bundled build runs npm through the bundled node; Windows/unix fallbacks
-  // resolve npm from PATH — see npmSpawn().
-  const { command, args: spawnArgs } = npmSpawn(args);
-  const child = spawn(command, spawnArgs, {
+  const child = spawn(plan.command, plan.args, {
     env, cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
   });
   tracker.child = child;
@@ -770,9 +911,9 @@ function dshHomeDir() {
  * The shell ships a pinned copy of the dshmarket plugin (the visual plugin
  * market) so every install has it out of the box — no npm download at first
  * run. scripts/fetch-market-plugin.js installs the pinned version into
- * build/market-plugin/node_modules at build time (packed via `files`); here we
- * STAGE the packages into the DSH web profile and mount the plugin through our
- * --patch overlay.
+ * build/market-plugin (packed via `files`, flattened out of node_modules);
+ * here we STAGE the packages into the DSH web profile and mount the plugin
+ * through our --patch overlay.
  *
  * Only the market's own runtime packages are staged (dshmarket + js-yaml +
  * undici + argparse): every @deepseek-ai/* import (dsh-settings, schemastery,
@@ -840,7 +981,10 @@ function stageBundledMarket() {
     log("bundled market: disabled in settings — skipped");
     return false;
   }
-  const srcDir = path.join(__dirname, "build", "market-plugin", "node_modules");
+  const srcDir = path.join(__dirname, "build", "market-plugin");
+  // NOTE: no "/node_modules" suffix — fetch-market-plugin.js FLATTENS the
+  // packages to the top because electron-builder drops nested node_modules
+  // from app.asar entirely (even when a files whitelist names them).
   if (!fs.existsSync(path.join(srcDir, "dshmarket", "package.json"))) {
     log("bundled market: build/market-plugin not found (run `npm run fetch:market`) — skipped");
     return false;
@@ -915,8 +1059,8 @@ function prepareDesktopPlugin() {
 
 /**
  * Ensure a DSH install exists. Uses the newest available one if present;
- * otherwise installs into the managed dir via npm (probing the fastest
- * registry first, and offering retry / switch-mirror / quit on failure).
+ * otherwise installs into the managed dir (probing the fastest registry
+ * first, and offering retry / switch-mirror / quit on failure).
  * cb(installOrNull) where install = `{ bin, base }`.
  */
 function ensureDSH(cb) {
@@ -926,7 +1070,7 @@ function ensureDSH(cb) {
     cb(existing);
     return;
   }
-  log("no local DSH found — installing via npm");
+  log("no local DSH found — installing");
   sendStatus("正在检测最快的 npm 镜像源…");
   probeFastestRegistry((registry) => {
     currentRegistry = registry;
@@ -941,53 +1085,71 @@ function ensureDSH(cb) {
 }
 
 /**
- * Run one npm install of DSH into the managed dir, streaming output and a
+ * Run one install of DSH into the managed dir, streaming output and a
  * determinate progress bar. cb({ ok, code, errTail }).
  */
 function installDSH(cb) {
   const reg = resolveNpmRegistry();
-  sendStatus(`正在通过 npm 安装最新版 DSH（镜像：${reg}）…\n首次安装约 ${INSTALL_ESTIMATE_MB}MB，可能需要几分钟。`);
-  log(`installing dsh via ${reg}`);
-  const stopProgress = trackInstallProgress();
-  // NOTE: pass the prefix path RAW (no JSON.stringify) — runNpm hands each arg
-  // to cmd separately and Node quotes paths with spaces correctly.
-  // --loglevel=info makes npm print per-request lines while downloading, so the
-  // stall watchdog below sees real activity (and the user sees it downloading).
-  const npm = runNpm(["install", "--prefix", dshDir(), "--no-save", "--no-audit", "--no-fund", "--loglevel=info", DSH_SPEC], null, (code, errTail) => {
+  const plan = installPlan();
+  sendStatus(`正在安装最新版 DSH（${plan.installer}，镜像：${reg}）…\n首次安装约 ${INSTALL_ESTIMATE_MB}MB，可能需要几分钟。`);
+  log(`installing dsh via ${reg} (${plan.installer})`);
+  if (plan.installer === "pnpm") prepareManagedDir(); // pnpm add needs a package.json; purge npm-era node_modules
+  const dirs = plan.installer === "pnpm" ? [pnpmStoreDir(), dshDir()] : [dshDir()];
+  const meter = createSizeMeter(dirs);
+  const stopProgress = trackInstallProgress(meter);
+  const inst = runInstaller(plan, null, (code, errTail) => {
     clearInterval(stallTimer);
     stopProgress(code === 0);
     if (code === 0) {
-      log("npm install done");
+      log(`install done (${plan.installer})`);
       cb({ ok: true, code: 0, errTail: "" });
       return;
     }
-    log(`npm install failed code=${code}`);
+    log(`install failed code=${code} (${plan.installer})`);
     cb({ ok: false, code, errTail });
   });
 
   // Download watchdog: a blackholed CDN node can accept TCP but never send
-  // data, leaving npm spinning with zero progress forever. If there is no
-  // extraction AND no npm output for INSTALL_STALL_MS, kill it and surface the
-  // stall (the error panel then offers 重试 / 换镜像重试).
-  let lastGrowth = dirSizeSync(dshDir());
+  // data, leaving the installer spinning with zero progress forever. If no
+  // bytes have been written AND no installer output for INSTALL_STALL_MS once
+  // the download has STARTED, kill it and surface the stall (the error panel
+  // then offers 重试 / 换镜像重试).
+  //
+  // IMPORTANT: the watchdog only arms after the first bytes land on disk.
+  // The dependency-resolution phase runs silently (little log output, no disk
+  // writes) and — with the npm fallback on a slow network — can legitimately
+  // take many minutes; killing it then aborts a perfectly healthy install.
+  // So a "stall" only means something once bytes have begun to flow. Note
+  // macOS GUI-launched apps get no shell env, so
+  // DSH_DESKTOP_INSTALL_STALL_SECONDS cannot be set there — the default
+  // behavior must be safe on its own.
+  let lastGrowth = null;
   let lastActivity = Date.now();
+  let downloadStarted = false;
   const stallTimer = setInterval(() => {
-    const sz = dirSizeSync(dshDir());
-    if (sz > lastGrowth) { lastGrowth = sz; lastActivity = Date.now(); return; }
-    if (npm.lastOutputMs > lastActivity) { lastActivity = npm.lastOutputMs; return; }
-    if (Date.now() - lastActivity > INSTALL_STALL_MS) {
-      clearInterval(stallTimer);
-      log(`npm install stalled (no progress for ${Math.round(INSTALL_STALL_MS / 1000)}s) — killing npm`);
-      sendLog("下载无进展：镜像节点可能异常，正在中止本次安装，请重试或换镜像…");
-      const pid = npm.child && npm.child.pid;
-      try {
-        if (pid && process.platform === "win32") {
-          spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-        } else if (npm.child) {
-          npm.child.kill();
-        }
-      } catch { /* ignore */ }
-    }
+    meter.measure((sz) => {
+      if (lastGrowth === null) { lastGrowth = sz; return; }
+      if (sz > lastGrowth) {
+        lastGrowth = sz;
+        lastActivity = Date.now();
+        downloadStarted = true;
+        return;
+      }
+      if (inst.lastOutputMs > lastActivity) { lastActivity = inst.lastOutputMs; return; }
+      if (downloadStarted && Date.now() - lastActivity > INSTALL_STALL_MS) {
+        clearInterval(stallTimer);
+        log(`install stalled (no progress for ${Math.round(INSTALL_STALL_MS / 1000)}s) — killing ${plan.installer}`);
+        sendLog("下载无进展：镜像节点可能异常，正在中止本次安装，请重试或换镜像…");
+        const pid = inst.child && inst.child.pid;
+        try {
+          if (pid && process.platform === "win32") {
+            spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+          } else if (inst.child) {
+            inst.child.kill();
+          }
+        } catch { /* ignore */ }
+      }
+    });
   }, 10000);
 }
 
@@ -1043,19 +1205,41 @@ function spawnDSH() {
 
 function doSpawn(found) {
   const { bin, base } = found;
-  const node = resolveNodeExecutable(); // bundled node, else system node
+  // The DSH core requires Node >= 22.15 (node:zlib zstd APIs — the 1.2.0
+  // incident). With the Electron runtime the embedded version is a build
+  // property of the shell; refuse loudly instead of a cryptic boot crash.
+  if (!runtimeSupportsDsh()) {
+    showStartupError({
+      message: "内置运行时版本过低",
+      detail: `DSH 核心需要 Node.js ≥ 22.15（node:zlib zstd API），当前壳内嵌 Node ${process.versions.node}。\n请升级桌面壳版本，或设 DSH_DESKTOP_NODE 指向一个 ≥22.15 的 Node 二进制。\n\n最近日志：\n${logTail.slice(-20).join("\n")}`,
+      canChangePort: false
+    });
+    return;
+  }
+  const runtime = dshRuntime();
   const portArgs = resolvePortArgs();
   // Mount the window-controls client plugin via a --patch overlay. `--patch`
   // is a launcher flag that conflicts with the `web` SUBcommand, so use the
   // launcher form `--patch <file> --profile web` (equivalent to `dsh web`).
   const patchPath = prepareDesktopPlugin();
   const patchArgs = patchPath ? ["--patch", patchPath] : [];
-  const profileArgs = ["--profile", "web", ...portArgs];
-  log(`spawning: ${node} ${bin} ${patchArgs.join(" ")} ${profileArgs.join(" ")}`);
+  // Core ≥0.1.0-rc.8 opens the default browser on `web` startup; the desktop
+  // renders the UI in its own frameless window, so suppress the handoff. The
+  // flag is version-gated: older cores reject unknown options at parse time.
+  const noOpenArgs = supportsNoOpen(base) ? ["--no-open"] : [];
+  const profileArgs = ["--profile", "web", ...portArgs, ...noOpenArgs];
+  log(`spawning: ${runtime.command} ${bin} ${patchArgs.join(" ")} ${profileArgs.join(" ")}${runtime.runAsNode ? " (ELECTRON_RUN_AS_NODE)" : ""}`);
   sendStatus("正在启动 DeepSeek Harness…");
 
-  const child = spawn(node, [bin, ...patchArgs, ...profileArgs], {
-    env: childEnv(),
+  const env = childEnv();
+  if (runtime.runAsNode) env.ELECTRON_RUN_AS_NODE = "1";
+  // --expose-internals is a NODE option (consumed by the runtime before
+  // bin.js, never reaching the core's strict commander): core rc.7+ launchers
+  // eagerly create the HMR service for cordis.patch.yml hot-watching, and the
+  // Hmr constructor hard-requires this flag — without it the core boots, then
+  // dies moments later (measured on rc.7 AND 0.1.1-rc.2 with fresh homes).
+  const child = spawn(runtime.command, ["--expose-internals", bin, ...patchArgs, ...profileArgs], {
+    env,
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true
@@ -1494,26 +1678,61 @@ function pushUpdateState() {
   return state;
 }
 
-/** Query the latest published version (npm view — fast). cb(latestOrNull). */
-function queryLatest(cb) {
-  const env = childEnv();
-  const { command, args } = npmSpawn(["view", DSH_SPEC, "version"]);
-  const child = spawn(command, args, { env, windowsHide: true });
-  let out = "";
-  child.stdout.on("data", (c) => { out += c.toString(); });
-  child.stderr.on("data", () => {});
-  child.on("error", () => cb(null));
-  child.on("close", () => {
-    const v = out.trim().split(/\s+/).pop() || null;
-    latestKnown = v;
-    cb(v);
-  });
+/** Split "@deepseek-ai/dsh@latest" → { name: "@deepseek-ai/dsh", tag: "latest" }. */
+function parseSpec(spec) {
+  if (spec.startsWith("@")) {
+    const slash = spec.indexOf("/");
+    const at = slash === -1 ? -1 : spec.indexOf("@", slash);
+    return at === -1
+      ? { name: spec, tag: "latest" }
+      : { name: spec.slice(0, at), tag: spec.slice(at + 1) || "latest" };
+  }
+  const at = spec.indexOf("@");
+  return at === -1
+    ? { name: spec, tag: "latest" }
+    : { name: spec.slice(0, at), tag: spec.slice(at + 1) || "latest" };
 }
 
 /**
- * Update DSH safely. Because npm replaces files under the running DSH's own
- * directory (EPERM/EBUSY on Windows — which used to crash the core mid-update),
- * we FIRST stop the DSH process, then install, then start the new version.
+ * Query the latest published version with ONE cheap HTTPS GET to
+ * <registry>/<name>/<tag> — no node/npm spawn at all (the old `npm view`
+ * subprocess cost ~1 s of startup alone, and bundled pnpm has no `view`).
+ * cb(latestOrNull); any failure (offline, registry down, non-200) → null,
+ * which just skips the passive update check.
+ */
+function queryLatest(cb) {
+  const { name, tag } = parseSpec(DSH_SPEC);
+  const reg = resolveNpmRegistry().replace(/\/+$/, "");
+  const url = `${reg}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`;
+  const transport = url.startsWith("https:") ? https : http;
+  try {
+    const req = transport.get(url, { headers: { Accept: "application/json" } }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); cb(null); return; }
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => { body += c; });
+      res.on("end", () => {
+        let v = null;
+        try {
+          const parsed = JSON.parse(body);
+          if (typeof parsed.version === "string") v = parsed.version;
+        } catch { /* malformed body */ }
+        latestKnown = v;
+        cb(v);
+      });
+    });
+    req.setTimeout(15000, () => { req.destroy(); cb(null); });
+    req.on("error", () => cb(null));
+  } catch {
+    cb(null);
+  }
+}
+
+/**
+ * Update DSH safely. Because the installer replaces files under the running
+ * DSH's own directory (EPERM/EBUSY on Windows — which used to crash the core
+ * mid-update), we FIRST stop the DSH process, then install, then start the
+ * new version.
  * cb(updated) — true when the new core was installed and is restarting.
  */
 function updateDSH(cb) {

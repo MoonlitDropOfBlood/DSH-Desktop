@@ -17,9 +17,9 @@
 
 把 **DeepSeek Harness（DSH）** 包装成一个原生桌面应用。它负责窗口、托盘、更新与桌面运行环境，同时完整保留官方 DSH 的智能体、模型、工具、会话与 Web UI。
 
-**DSH 核心不打进安装包**：目标机器首次启动时自动通过 `npm` 安装最新版 DSH，之后直接复用本机已有的完整安装——既保持轻量，又能随时更新到最新。
+**DSH 核心不打进安装包**：目标机器首次启动时自动通过内置 pnpm 安装最新版 DSH，之后直接复用本机已有的完整安装——既保持轻量，又能随时更新到最新。
 
-**Node.js 运行时内置**：app 自带一份官方 Node（含 npm，随安装包分发），启动 DSH、安装/更新核心完全不需要用户机器上装有 node/npm——macOS 上从 Finder/Dock 启动也不会因为缺少用户 shell 的 PATH 而失败。
+**零依赖运行**：DSH 核心直接跑在 Electron 内嵌的 Node 运行时上（`ELECTRON_RUN_AS_NODE`），核心的安装/更新用内置 pnpm——最终用户机器上**不需要安装 node/npm**。（注：MCP 子进程依赖用户 PATH 里的 node/npx，常规开发机均满足。）
 
 > **DSH 来自哪个 npm 仓库？** 核心 `@deepseek-ai/dsh` 发布在官方 **npmjs.org**（`https://registry.npmjs.org`）。国内网络下默认使用 npmmirror 镜像（`registry.npmmirror.com`），探测不可用或安装失败时会自动回退 npmjs.org，也可用 `DSH_DESKTOP_NPM_REGISTRY` 指定。安装过程会显示**实时进度条与已下载大小**。
 
@@ -75,7 +75,7 @@
 | macOS | dmg（Apple Silicon / Intel） |
 | Linux | AppImage · deb · rpm |
 
-> 首次启动会自动安装最新版 DSH（约 250MB），之后启动为瞬时。运行环境需要 [Node.js](https://nodejs.org/) ≥ 18。
+> 首次启动会自动安装最新版 DSH（约 250MB，由内置 pnpm 安装，通常几十秒）。最终用户无需安装 Node.js；从源码开发需要 Node ≥ 18。
 
 ## 从源码运行 / 开发
 
@@ -102,9 +102,9 @@ GitHub Actions（`.github/workflows/build-installers.yml`）可在打 `v*` 标�
 npm start
   └─ Electron 主进程
        └─ 定位 DSH：应用托管目录 → node_modules → npm _npx 缓存（最新完整安装）
-       └─ 没有则 npm install @deepseek-ai/dsh@latest（registry 探测 + 失败重试/换镜像 + 实时进度条）
+       └─ 没有则 pnpm add @deepseek-ai/dsh@latest（内置 pnpm；registry 探测 + 失败重试/换镜像 + 实时进度条）
        └─ 端口预检：被占用则弹「换端口并重试」面板（端口持久化）
-       └─ spawn: node <dsh>/lib/bin.js --patch <desktop-plugin> --profile web --port X
+       └─ spawn: Electron 自身 (ELECTRON_RUN_AS_NODE=1) <dsh>/lib/bin.js --patch <desktop-plugin> --profile web --port X [--no-open]
             └─ 桌面插件嵌入 DSH UI：窗口控制条 / 设置页 / 更新徽章
             └─ DSH 打印 URL → 应用解析 → loadURL 到 frameless 窗口
        └─ 启动/加载失败或插件未挂载 → 回到启动页（自带窗口控制条 + 重试/换端口/退出），
@@ -123,13 +123,14 @@ npm start
 | `DSH_DESKTOP_NPM_REGISTRY` | npm 镜像（默认 npmmirror） |
 | `DSH_DESKTOP_NPM_CACHE` | npm 缓存目录 |
 | `DSH_DESKTOP_SPEC` | DSH npm 规格（默认 `@deepseek-ai/dsh@latest`） |
-| `DSH_DESKTOP_TIMEOUT` | 启动看门狗超时秒数（默认 720s） |
+| `DSH_DESKTOP_TIMEOUT` | 启动看门狗超时秒数（默认 1800s） |
 | `DSH_DESKTOP_INSTALL_ESTIMATE_MB` | 安装进度条估算总大小（默认 250MB） |
+| `DSH_DESKTOP_PNPM_VERSION` | 构建期打包的内置 pnpm 版本（默认 10.33.0） |
 
 ## 常见问题
 
 - **端口冲突**：应用启动前会预检端口。若 3080 被占用（如浏览器里开着另一个 DSH），会弹出「端口已被占用」面板，可直接**换一个端口并重试**（端口会记住）；或设 `DSH_DESKTOP_PORT` 换端口。
-- **首次安装慢/卡住**：首次会下载约 250MB 的 DSH 依赖树，启动页有**进度条 + 已下载大小**。若网络下载慢，设镜像：`$env:npm_config_registry = "https://registry.npmmirror.com"`。
+- **首次安装慢/卡住**：DSH 核心由内置 pnpm 安装（解析+下载通常几十秒），启动页有**进度条 + 已下载大小**。若网络下载慢，设镜像：`$env:npm_config_registry = "https://registry.npmmirror.com"`。
 - **启动失败看不到原因**：所有启动/崩溃错误都会显示在启动页的错误面板（含最近日志），提供「重试 / 换端口并重试 / 退出」。
 - **点更新没反应或崩溃**：更新会先停掉 DSH 核心再安装新版本（避免 Windows 下覆盖运行中文件导致崩溃），失败时可选择「用当前版本继续」。
 - **常驻通知栏看不到托盘图标**：开启「常驻通知栏」后**立即**创建托盘图标（无需先点一次关闭）。
@@ -153,7 +154,7 @@ dsh-desktop/
 ├── dsh-desktop-plugin/     # 嵌入 DSH UI 的桌面插件（窗口控制条/设置页/更新徽章）
 │   ├── client.js           #   浏览器端：Slot UI
 │   └── index.js            #   Host 端：任务事件 → 通知桥
-├── scripts/                # 图标生成 / exe 图标嵌入
+├── scripts/                # 图标生成 / exe 图标嵌入 / 插件市场、pnpm 拉取
 ├── build/                  # 鲸鱼 SVG 与各平台图标
 ├── .github/workflows/      # GitHub Actions 跨平台构建发布
 ├── AGENTS.md               # 面向 AI agent 的开发指南（含踩坑记录）

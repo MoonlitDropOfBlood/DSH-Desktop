@@ -6,6 +6,60 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.4.0] - 2026-08-22
+
+### 修复
+
+- **窗口控制条被右侧栏插件面板遮挡（实测 mac）**：控制条原本挂载在 `shell.overlay` 槽内、受 DSH 叠层
+  上下文限制，右侧栏插件展开后会把最小化/最大化/关闭 + Session log 按钮盖住。修复：改用
+  `ReactDOM.createPortal(..., document.body)` 渲染（loader 的 staticModules 暴露 `react-dom`，组件仍在槽的
+  React 树里、仅 DOM 出口落到 body 层，`position:fixed` + 最大 z-index 保证最顶）。注：中间一版曾手动
+  `appendChild` 把 React 管理的节点挪到 body，导致槽位宿主下次渲染时调和崩溃、按钮全部失效——
+  已修正为 portal 正道。
+- **打包版内置市场缺失**：electron-builder 会把 asar 里任何嵌套 `node_modules` 整体丢弃（即使 `files`
+  白名单显式包含），`stageBundledMarket` 的源目录在打包版里不存在、市场从未真正随包分发。修复：
+  `fetch-market-plugin.js` 先装进临时 prefix、再把 `node_modules/*` 展平到 `build/market-plugin/` 顶层。
+- **核心启动后崩死（`--expose-internals is required for HMR service`）**：核心 rc.7+ 的启动器会无条件创建
+  HMR 服务用于 `cordis.patch.yml` 热重载，而它要求进程以 `node --expose-internals` 启动——缺 flag 时核心
+  启动后片刻即崩（全新 home 的 rc.7 与 0.1.1-rc.2 均实测复现，即**新用户首启必炸**，CLI 裸跑同样会炸，
+  属核心侧问题）。修复：spawn 参数固定前置 `--expose-internals`（node 选项、不进核心 commander，
+  新老核心均安全；实测两版完整启动 + HTTP 200）。
+- **DSH 核心安装/更新极慢（arborist 病态解析）**：壳的安装形态是"裸目录 + `@latest`"——首次安装没有任何
+  本地状态，更新时新版本的兄弟包依赖区间（钉当次发版线）也让旧 lockfile 失效，所以 npm 每次都从零全树解析；
+  dsh 核心是 ~195 个互相依赖的 `@deepseek-ai/*` 包 + react peerDeps，npm 的 arborist 在这种树上 placeDep
+  超线性爆炸，实测**仅解析阶段就烧 >10 分钟 CPU 还跑不完**（内置 npm 与系统 npm 同样病态，与网络无关）。
+  修复：安装/更新改用**内置 pnpm**（`scripts/fetch-pnpm.js` 拉取 pin 版本，经 extraResources 打进
+  `resources/pnpm`，运行时 `node <pnpm.cjs> add --dir <托管目录>`，不依赖 PATH）——同机同树实测
+  解析+下载+链接 **17.8s**（npm 光解析就 >10min），热 store 更新 **3.5s**。pnpm 不存在时自动回退原 npm
+  命令行。迁移：安装前自动清除 npm 时代留下的 node_modules（无 `.modules.yaml` 判定），pnpm store 固定在
+  `<userData>/pnpm-store`（与托管目录同卷保证硬链接）。
+- **版本检查去掉 `npm view` 子进程**：`queryLatest()` 改为直连 registry 的 `GET /<name>/<tag>` 单次 HTTP
+  请求（每次检查省 ~1s 的子进程启动开销，也不再依赖 npm/pnpm 任何一方在场）。
+- **安装进度轮询不再卡主进程**：`trackInstallProgress()` 由"每 1.5s 同步全树 `statSync`"（3.3 万文件单次
+  ~615ms，曾把主进程约 40% 时间烧在重复 stat 上并与安装器抢磁盘 I/O）改为每 2s 一次的**异步**遍历，且进度条
+  与下载看门狗共享同一个防叠加测量器；pnpm 的下载先落 store 再硬链进安装目录，两个目录一并计入进度。
+
+### 新增
+
+- **桌面壳内不再弹系统浏览器**：DSH 核心自 `0.1.0-rc.8` 起 `web` 命令默认打开系统浏览器，
+  桌面壳有自己的 frameless 窗口、不需要这个动作。启动参数自动追加 `--no-open`（核心官方开关），
+  并按核心版本做门禁（`supportsNoOpen()`：老核心的 commander 严格解析会把未知选项当错误，
+  <0.1.0-rc.8 的核心不传该参数）。
+
+### 变更
+
+- **Electron 33 → 43**（内嵌运行时 Node 20.18→24.18 / Chromium 130→150）：Electron 33 早已 EOL、不再收
+  Chromium 安全补丁；本壳用到的 API 面（BrowserWindow/Tray/ipcMain/Notification/powerSaveBlocker/nativeImage）
+  全部稳定兼容，已通过 43.4.1 冒烟验证（窗口创建 + sandbox 页面加载 + 托盘图标解码）。注意 Electron 的
+  postinstall 下载会被 npm 的 allow-scripts 门禁拦截，升级后若 `node_modules/electron/dist` 缺失，
+  手动跑一次 `node node_modules/electron/install.js` 即可。
+- **移除内置 Node 发行版，DSH 核心改跑 Electron 内嵌 Node**：Electron 43 内嵌 Node 24.18（满足核心
+  ≥22.15 的 node:zlib zstd 需求）。`dshRuntime()` 以 `ELECTRON_RUN_AS_NODE=1` 把 Electron 二进制当纯
+  Node 运行核心与安装器（已实测完整拉起核心、含 koffi/sharp/node-pty 等 NAPI 原生模块并 HTTP 200）；
+  spawn 前校验内嵌版本，过低直接弹错误面板（1.2.0 zstd 事故的正式护栏）。安装包体积 ↓ ~30MB；
+  `fetch-node.js`、`build/node/`、`DSH_DESKTOP_NODE_VERSION/MIRROR` 全部移除。代价（明确接受）：MCP
+  子进程依赖用户 PATH 里的 node/npx（终端 Profile 合并已覆盖常规场景）。
+
 ## [1.3.1] - 2026-08-21
 
 ### 修复

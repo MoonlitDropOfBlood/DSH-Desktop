@@ -12,6 +12,14 @@
  * install at runtime — a profile-installed copy does not bring those into the
  * profile either, so they are deliberately NOT vendored.
  *
+ * LAYOUT NOTE (why the packages are FLATTENED out of node_modules): the shell
+ * ships this tree inside app.asar via `files: ["build/market-plugin/**"]`, and
+ * electron-builder DROPS any nested `node_modules` from the asar even when a
+ * `files` whitelist pattern names it (measured: a probe file beside node_modules
+ * is packed, everything under build/market-plugin/node_modules is not). So npm
+ * installs into a temp prefix and the result is moved UP one level into
+ * `build/market-plugin/` (dshmarket/package.json, js-yaml/… at the top).
+ *
  * Usage:
  *   node scripts/fetch-market-plugin.js
  *
@@ -31,6 +39,8 @@ const { spawnSync } = require("child_process");
 const VERSION = process.env.DSH_DESKTOP_MARKET_VERSION || "1.15.0";
 const REGISTRY = process.env.DSH_DESKTOP_NPM_REGISTRY || "https://registry.npmmirror.com";
 const OUT = path.join(__dirname, "..", "build", "market-plugin");
+/** npm's prefix for the install; its node_modules is moved into OUT afterwards. */
+const TMP = path.join(__dirname, "..", "build", ".market-tmp");
 /** Runtime packages main.js stages into the profile (sanity-checked here). */
 const EXPECTED = ["dshmarket", "js-yaml", "undici", "argparse"];
 
@@ -38,7 +48,7 @@ function log(...a) { console.log("[fetch-market]", ...a); }
 
 function stagedVersion() {
   try {
-    return JSON.parse(fs.readFileSync(path.join(OUT, "node_modules", "dshmarket", "package.json"), "utf8")).version;
+    return JSON.parse(fs.readFileSync(path.join(OUT, "dshmarket", "package.json"), "utf8")).version;
   } catch {
     return null;
   }
@@ -60,10 +70,12 @@ function main() {
   }
   log(`installing dshmarket@${VERSION} into ${path.relative(process.cwd(), OUT)} (registry ${REGISTRY})…`);
   fs.rmSync(OUT, { recursive: true, force: true });
+  fs.rmSync(TMP, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
+  fs.mkdirSync(TMP, { recursive: true });
   const args = [
     "install",
-    "--prefix", OUT,
+    "--prefix", TMP,
     "--no-save",
     "--omit=dev",
     "--no-audit",
@@ -74,8 +86,12 @@ function main() {
   ];
   if (process.env.DSH_DESKTOP_NPM_CACHE) args.push(`--cache=${process.env.DSH_DESKTOP_NPM_CACHE}`);
   npmInstall(args);
+  // Flatten node_modules/* up into OUT — nested node_modules is dropped from
+  // app.asar by electron-builder (see the header comment).
+  fs.cpSync(path.join(TMP, "node_modules"), OUT, { recursive: true });
+  fs.rmSync(TMP, { recursive: true, force: true });
   for (const pkg of EXPECTED) {
-    if (!fs.existsSync(path.join(OUT, "node_modules", pkg, "package.json"))) {
+    if (!fs.existsSync(path.join(OUT, pkg, "package.json"))) {
       throw new Error(`build/market-plugin is missing ${pkg} — npm layout changed?`);
     }
   }
