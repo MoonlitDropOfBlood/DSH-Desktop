@@ -106,6 +106,8 @@ window.__ModuleLoader__.load({
 - `package.json` 必须 `exports` 里包含 `"./package.json"`，否则 `require.resolve("<pkg>/package.json")` 失败（exports 字段会封锁子路径）。
 - `ctx.slots` 直接访问需要 `exports.inject = ["slots"]`，否则 "cannot get property slots without inject"。
 
+**设置导航图标**：DSH 0.1.x 的 `settings.section` 只投影 `id/order/label`，设置壳对每个外部 section 统一画通用齿轮（`client-ui-settings-general` 的 `navIcon()`，没有公开图标字段）。client.js 里 `registerSettingsNavIcons(SETTINGS_NAV_ENTRIES)` 用 MutationObserver 给 `[role="dialog"] nav button` 中文本等于 section label 的行打 `data-dsh-desktop-core-settings-nav` / `data-dsh-desktop-shell-settings-nav` 标记，CSS 再隐藏 `>svg:first-child` 齿轮、用 `currentColor` mask 画 cpu（核心）/ monitor（桌面版）Lucide 图标（16px，跟随原生 hover/active 颜色）。换图标只需替换 CSS 里 data URI 的 SVG path（Lucide，24×24，stroke-width 2，stroke 用 black——mask 只取 alpha）。
+
 ### 2b. 内置插件市场（dshmarket，`stageBundledMarket`）
 
 壳自带 [dsh-market](https://github.com/dsh-market/dsh-market) 插件市场（pin 版本，`DSH_DESKTOP_MARKET_VERSION` 覆盖），开箱即用、目标机器零下载：

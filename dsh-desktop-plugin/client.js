@@ -674,7 +674,63 @@ window.__ModuleLoader__.load({
 .dsh-desktop-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .dsh-desktop-hint { color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 18px; }
 .dsh-desktop-actions { gap: 8px; }
+
+/* Settings nav icons: DSH 0.1.x settings.section only projects
+   id/order/label, and the settings shell paints a generic gear for every
+   external section (client-ui-settings-general's navIcon()).
+   registerSettingsNavIcons marks our own nav rows; hide the shell's gear
+   and draw the cpu (核心) / monitor (桌面版) Lucide glyphs as currentColor
+   masks so they follow the native nav hover/active colors without changing
+   the shell's 16px icon rhythm. */
+[data-dsh-desktop-core-settings-nav]>svg:first-child{display:none}
+[data-dsh-desktop-core-settings-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='2'/%3E%3Crect x='9' y='9' width='6' height='6'/%3E%3Cpath d='M15 2v2'/%3E%3Cpath d='M15 20v2'/%3E%3Cpath d='M2 15h2'/%3E%3Cpath d='M2 9h2'/%3E%3Cpath d='M20 15h2'/%3E%3Cpath d='M20 9h2'/%3E%3Cpath d='M9 2v2'/%3E%3Cpath d='M9 20v2'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='2'/%3E%3Crect x='9' y='9' width='6' height='6'/%3E%3Cpath d='M15 2v2'/%3E%3Cpath d='M15 20v2'/%3E%3Cpath d='M2 15h2'/%3E%3Cpath d='M2 9h2'/%3E%3Cpath d='M20 15h2'/%3E%3Cpath d='M20 9h2'/%3E%3Cpath d='M9 2v2'/%3E%3Cpath d='M9 20v2'/%3E%3C/svg%3E") center/contain no-repeat}
+[data-dsh-desktop-shell-settings-nav]>svg:first-child{display:none}
+[data-dsh-desktop-shell-settings-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='14' rx='2'/%3E%3Cpath d='M8 21h8'/%3E%3Cpath d='M12 17v4'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='14' rx='2'/%3E%3Cpath d='M8 21h8'/%3E%3Cpath d='M12 17v4'/%3E%3C/svg%3E") center/contain no-repeat}
 `;
+
+		const SETTINGS_CORE_LABEL = "核心";
+		const SETTINGS_SHELL_LABEL = "桌面版";
+		/* Settings nav icons: DSH 0.1.x does not yet carry an icon through the
+		   settings.section registration contract — the shell projects only
+		   id/order/label and paints a generic gear for every external section.
+		   Mark only this plugin's nav rows (核心 / 桌面版) so the CSS above can
+		   replace the fallback gears; the disposer clears the markers for
+		   plugin disable / HMR reload. */
+		const SETTINGS_NAV_ENTRIES = [
+			{ label: SETTINGS_CORE_LABEL, marker: "data-dsh-desktop-core-settings-nav" },
+			{ label: SETTINGS_SHELL_LABEL, marker: "data-dsh-desktop-shell-settings-nav" }
+		];
+
+		function registerSettingsNavIcons(entries) {
+			let disposed = false;
+			const sync = function () {
+				if (disposed) return;
+				const buttons = document.querySelectorAll('[role="dialog"] nav button');
+				for (let i = 0; i < buttons.length; i++) {
+					const button = buttons[i];
+					const text = button.textContent ? button.textContent.trim() : "";
+					for (let j = 0; j < entries.length; j++) {
+						const entry = entries[j];
+						if (entry.label.length > 0 && text === entry.label) {
+							button.setAttribute(entry.marker, "");
+						} else {
+							button.removeAttribute(entry.marker);
+						}
+					}
+				}
+			};
+			sync();
+			const observer = new MutationObserver(sync);
+			observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+			return function () {
+				disposed = true;
+				observer.disconnect();
+				for (let j = 0; j < entries.length; j++) {
+					const marked = document.querySelectorAll("[" + entries[j].marker + "]");
+					for (let i = 0; i < marked.length; i++) marked[i].removeAttribute(entries[j].marker);
+				}
+			};
+		}
 
 		function apply(ctx) {
 			const styleTag = document.createElement("style");
@@ -692,6 +748,9 @@ window.__ModuleLoader__.load({
 				styleTag.remove();
 				if (document.documentElement) document.documentElement.removeAttribute("data-dsh-desktop");
 			});
+			// Mark our settings-nav rows (核心 / 桌面版) so the CSS above
+			// replaces the shell's fallback gear for both sections.
+			if (typeof ctx.effect === "function") ctx.effect(() => registerSettingsNavIcons(SETTINGS_NAV_ENTRIES));
 
 			ctx.slots.inject("shell.overlay", () => ctx.slots.register(
 				{
@@ -708,11 +767,11 @@ window.__ModuleLoader__.load({
 				UpdateBadge
 			));
 			ctx.slots.inject("settings.section", () => ctx.slots.register(
-				{ name: "settings.section", id: "dsh-desktop-core", order: 100, label: "核心" },
+				{ name: "settings.section", id: "dsh-desktop-core", order: 100, label: SETTINGS_CORE_LABEL },
 				CoreSection
 			));
 			ctx.slots.inject("settings.section", () => ctx.slots.register(
-				{ name: "settings.section", id: "dsh-desktop-shell", order: 101, label: "桌面版" },
+				{ name: "settings.section", id: "dsh-desktop-shell", order: 101, label: SETTINGS_SHELL_LABEL },
 				DesktopSection
 			));
 		}

@@ -6,6 +6,16 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.4.3] - 2026-08-23
+
+### 新增
+
+- **设置导航自定义图标**：DSH 0.1.x 的 `settings.section` 只投影 `id/order/label`，设置壳对每个外部 section
+  统一画通用齿轮（没有公开图标字段）。`dsh-desktop-plugin/client.js` 新增 `registerSettingsNavIcons()`：
+  用 MutationObserver 给设置对话框导航里文本等于 section label 的行打标记，CSS 隐藏默认齿轮、用
+  `currentColor` mask 绘制 Lucide 图标——**核心**（cpu 芯片）与**桌面版**（monitor 显示器）两个设置
+  页在侧栏导航里不再显示通用齿轮。换图标只需替换 CSS 里 data URI 的 SVG path。
+
 ## [1.4.2] - 2026-08-23
 
 ### 修复
