@@ -72,10 +72,25 @@ const INSTALL_STALL_MS = (() => {
   const s = Number(process.env.DSH_DESKTOP_INSTALL_STALL_SECONDS);
   return Number.isFinite(s) && s > 0 ? s * 1000 : 120 * 1000;
 })();
+/**
+ * Grace period for ADOPTING an externally restarted DSH: when the core exits
+ * unexpectedly, a plugin (e.g. dshmarket's one-click self-restart) may be
+ * bringing up a detached replacement on the SAME port seconds later. Probe
+ * the port this long before reporting the exit as a crash — adopting the
+ * replacement beats a crash panel followed by a "port in use" deadlock when
+ * the user retries.
+ */
+const ADOPT_RESTART_GRACE_MS = 12000;
 
 let mainWindow = null;
 let dshProc = null;
 let dshUrl = null;
+/**
+ * PID of an externally restarted DSH core the shell ADOPTED (it owns the port
+ * but is not our child — no exit events, no stdio). Tracked so killDSH /
+ * restart / quit can still manage it. Null while we own the child ourselves.
+ */
+let adoptedPid = null;
 let quitRequested = false;
 let restartRequested = false;
 let watchdogTimer = null;
@@ -216,6 +231,35 @@ function suggestFreePort(from) {
     };
     tryNext();
   });
+}
+
+/**
+ * PID of the process LISTENING on <port>, or null. Rare, bounded calls only
+ * (adoption / guarded kill of an adopted core) — sync with a hard timeout.
+ * v4 only: DSH binds 127.0.0.1, and netstat's TCPv6 rows are excluded by the
+ * "TCP " proto match. lsof exits 1 when nothing matches → caught → null.
+ */
+function listenerPid(port) {
+  try {
+    if (process.platform === "win32") {
+      const out = execFileSync("netstat", ["-ano"], { timeout: 8000, windowsHide: true, encoding: "utf8" });
+      let anyMatch = null;
+      for (const line of out.split(/\r?\n/)) {
+        const m = line.match(/^\s*TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/);
+        if (!m || Number(m[2]) !== Number(port)) continue;
+        // DSH serves loopback — prefer the 127.0.0.1 row when the port is
+        // bound on several local addresses at once.
+        if (m[1] === "127.0.0.1") return Number(m[3]);
+        if (anyMatch === null) anyMatch = Number(m[3]);
+      }
+      return anyMatch;
+    }
+    const out = execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { timeout: 8000, encoding: "utf8" });
+    const pid = Number(out.split(/\r?\n/)[0]);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1018,17 +1062,44 @@ function stagePackage(srcDir, name, dstDir, mode) {
 }
 
 /**
- * Stage the bundled market into the web profile and decide whether to mount
- * it. Returns true when the desktop should add the dsh-market row to the
- * --patch overlay; false when the feature is switched off, the bundle is
- * missing, or the profile ALREADY mounts the market itself — the user's own
- * copy then wins, because Cordis `- insert:` appends unconditionally and a
- * second row with the same id would mount the plugin TWICE.
+ * Decide how the dsh-market plugin market appears in the --patch overlay, and
+ * stage the bundled copy when it is the one to be mounted. Returns one of:
+ *
+ *  - "user":   the profile ALREADY mounts dshmarket itself (its package.json
+ *              bundles list, or a hand-written row in cordis.patch.yml). The
+ *              user's own copy wins: Cordis `- insert:` appends
+ *              unconditionally, so adding a second row with the same id would
+ *              mount the plugin TWICE. The caller instead emits a plain
+ *              `- id:` OVERRIDE row forcing allowRestart:false — the market's
+ *              self-restart spawns a detached core that bypasses the shell's
+ *              lifecycle (the exit looks like a crash here, and the
+ *              replacement steals the port). Checked FIRST, independent of
+ *              the bundleMarket toggle: that toggle only governs the BUNDLED
+ *              copy, never lifecycle safety over the user's own.
+ *  - "staged": the shell staged its pinned copy into the profile; the caller
+ *              INSERTs the mount row (also with allowRestart:false).
+ *  - null:     no market row (feature switched off, or the bundle is missing).
  */
-function stageBundledMarket() {
+function prepareBundledMarket() {
+  const profileDir = path.join(dshHomeDir(), "profiles", "web");
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(profileDir, "package.json"), "utf8"));
+    const bundles = (((pkg || {}).dsh || {}).profile || {}).bundles;
+    if (Array.isArray(bundles) && bundles.includes("dshmarket")) {
+      log("bundled market: profile already bundles dshmarket — user's own copy wins (allowRestart still forced off)");
+      return "user";
+    }
+  } catch { /* no profile package.json yet → not user-mounted */ }
+  try {
+    const patchText = fs.readFileSync(path.join(profileDir, "cordis.patch.yml"), "utf8");
+    if (patchText.includes("dshmarket")) {
+      log("bundled market: profile cordis.patch.yml already mounts dshmarket — user's own copy wins (allowRestart still forced off)");
+      return "user";
+    }
+  } catch { /* no patch file → not user-mounted */ }
   if (readSettings().bundleMarket === false) {
     log("bundled market: disabled in settings — skipped");
-    return false;
+    return null;
   }
   const srcDir = path.join(__dirname, "build", "market-plugin");
   // NOTE: no "/node_modules" suffix — fetch-market-plugin.js FLATTENS the
@@ -1036,30 +1107,14 @@ function stageBundledMarket() {
   // from app.asar entirely (even when a files whitelist names them).
   if (!fs.existsSync(path.join(srcDir, "dshmarket", "package.json"))) {
     log("bundled market: build/market-plugin not found (run `npm run fetch:market`) — skipped");
-    return false;
+    return null;
   }
-  const profileDir = path.join(dshHomeDir(), "profiles", "web");
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(profileDir, "package.json"), "utf8"));
-    const bundles = (((pkg || {}).dsh || {}).profile || {}).bundles;
-    if (Array.isArray(bundles) && bundles.includes("dshmarket")) {
-      log("bundled market: profile already bundles dshmarket — user's own copy wins");
-      return false;
-    }
-  } catch { /* no profile package.json yet → not user-mounted */ }
-  try {
-    const patchText = fs.readFileSync(path.join(profileDir, "cordis.patch.yml"), "utf8");
-    if (patchText.includes("dshmarket")) {
-      log("bundled market: profile cordis.patch.yml already mounts dshmarket — user's own copy wins");
-      return false;
-    }
-  } catch { /* no patch file → not user-mounted */ }
   const dstDir = path.join(profileDir, "node_modules");
   fs.mkdirSync(dstDir, { recursive: true });
   stagePackage(srcDir, "dshmarket", dstDir, "always");
   for (const dep of ["js-yaml", "undici", "argparse"]) stagePackage(srcDir, dep, dstDir, "compatible");
   log(`bundled market staged into ${dstDir}`);
-  return true;
+  return "staged";
 }
 
 function prepareDesktopPlugin() {
@@ -1078,15 +1133,15 @@ function prepareDesktopPlugin() {
       "- insert:\n" +
       "  - id: dsh-desktop-plugin\n" +
       "    name: 'dsh-desktop-plugin'\n";
-    let marketMounted = false;
+    let marketMode = null;
     try {
-      marketMounted = stageBundledMarket();
+      marketMode = prepareBundledMarket();
     } catch (err) {
       // A market staging failure must never drop the window-controls patch:
       // report it and continue with the desktop plugin alone.
       log(`bundled market staging failed (continuing without it): ${err.message}`);
     }
-    if (marketMounted) {
+    if (marketMode === "staged") {
       patch +=
         "# Built-in plugin market (dshmarket), staged into the profile by the shell.\n" +
         "- insert:\n" +
@@ -1096,6 +1151,23 @@ function prepareDesktopPlugin() {
         "      # The Electron shell owns the DSH process lifecycle; the market's\n" +
         "      # own restart would spawn a rogue core and look like a crash here.\n" +
         "      allowRestart: false\n";
+    } else if (marketMode === "user") {
+      patch +=
+        "# The profile mounts its own dshmarket copy — never INSERT a second row\n" +
+        "# (Cordis `- insert:` appends unconditionally and would mount it TWICE).\n" +
+        "# This plain `- id:` row OVERRIDES the existing entry instead (the name\n" +
+        "# guard skips it harmlessly if the id ever belongs to another package).\n" +
+        "# NOTE: the override REPLACES the row's whole `config` object (per-key\n" +
+        "# assignment, no deep merge) — safe here because dshmarket's own mount\n" +
+        "# row carries no config, and its remaining keys (profile/maxSnapshots)\n" +
+        "# fall back to `--profile web` / defaults.\n" +
+        "# allowRestart:false: the market's self-restart spawns a detached core\n" +
+        "# that bypasses the shell's lifecycle — the old process's exit reads as\n" +
+        "# a crash and the replacement steals the port.\n" +
+        "- id: dsh-market\n" +
+        "  name: 'dshmarket'\n" +
+        "  config:\n" +
+        "    allowRestart: false\n";
     }
     fs.writeFileSync(patchPath, patch, "utf8");
     log(`desktop plugin staged at ${targetDir}`);
@@ -1324,11 +1396,29 @@ function doSpawn(found) {
     if (quitRequested || restartRequested || isUpdating) return;
     const tail = logTail.slice(-25).join("\n");
     const portConflict = /EADDRINUSE|address already in use|already in use/i.test(tail);
-    showStartupError({
+    const report = () => showStartupError({
       message: hadStarted ? "DeepSeek Harness 进程已退出" : "DeepSeek Harness 启动失败",
       detail: `退出码：${code ?? "无"}\n\n最近日志：\n${tail}`,
       canChangePort: portConflict || !hadStarted,
       suggestPort: portConflict ? null : undefined
+    });
+    // A plugin may have restarted the core OUT-OF-BAND — dshmarket's
+    // one-click self-restart SIGTERMs this process and brings up a detached
+    // replacement on the SAME port seconds later. (The shell force-disables
+    // that button via allowRestart:false, but the market's own settings page
+    // lets a user turn it back on.) Give the port a short grace period and
+    // ADOPT the replacement — the window just reloads to it — instead of
+    // misreporting a crash and deadlocking on "port in use" at retry. A real
+    // crash simply times the probe out and gets the panel as before.
+    if (!hadStarted) { report(); return; }
+    const port = effectivePort();
+    const url = `http://127.0.0.1:${port}`;
+    probeServerUp(url, ADOPT_RESTART_GRACE_MS, (up) => {
+      if (!up || quitRequested) { report(); return; }
+      adoptedPid = listenerPid(port);
+      dshUrl = url;
+      log(`adopted externally restarted DSH at ${url} (pid ${adoptedPid ?? "unknown"})`);
+      openDSH(url);
     });
   });
 
@@ -1399,6 +1489,40 @@ function waitForServerThenOpen(url, attempt) {
   });
 }
 
+/**
+ * Poll a URL until it answers (<400) or the deadline passes, then cb(up).
+ * Bounded cousin of waitForServerThenOpen: used to detect an externally
+ * restarted DSH core on our port (see the dshProc "exit" handler).
+ */
+function probeServerUp(url, deadlineMs, cb) {
+  const until = Date.now() + deadlineMs;
+  let settled = false;
+  const done = (up) => {
+    if (settled) return;
+    settled = true;
+    cb(up);
+  };
+  const retry = () => {
+    if (settled) return;
+    if (Date.now() < until) setTimeout(attempt, 500);
+    else done(false);
+  };
+  const attempt = () => {
+    if (quitRequested) return done(false);
+    const req = http.get(url, (res) => {
+      res.resume();
+      if (res.statusCode !== undefined && res.statusCode < 400) done(true);
+      else retry();
+    });
+    req.setTimeout(2500, () => {
+      req.destroy(); // no arg → no "error" event; the retry happens right here
+      retry();
+    });
+    req.on("error", retry);
+  };
+  attempt();
+}
+
 function startDSH() {
   if (dshProc) return;
   spawnDSH();
@@ -1407,15 +1531,21 @@ function startDSH() {
 function killDSH(cb) {
   const proc = dshProc;
   dshProc = null;
-  if (!proc) {
+  // An adopted (externally restarted) core is reaped after the owned child,
+  // so a restart/quit never leaves a detached replacement holding the port.
+  const afterOwned = () => {
+    if (adoptedPid !== null) { killAdoptedDSH(cb); return; }
     if (cb) cb();
+  };
+  if (!proc) {
+    afterOwned();
     return;
   }
   let done = false;
   const finish = () => {
     if (!done) {
       done = true;
-      if (cb) cb();
+      afterOwned();
     }
   };
   if (process.platform === "win32") {
@@ -1437,6 +1567,56 @@ function killDSH(cb) {
       /* already gone */
     }
     setTimeout(finish, 2000);
+  }
+}
+
+/**
+ * Kill an ADOPTED (externally restarted) DSH core by PID. Guarded: the kill
+ * only proceeds when the recorded PID is STILL the listener on our port, so
+ * a recycled PID now belonging to an unrelated process is never touched.
+ */
+function killAdoptedDSH(cb) {
+  const pid = adoptedPid;
+  adoptedPid = null;
+  if (pid === null) {
+    if (cb) cb();
+    return;
+  }
+  const port = effectivePort();
+  if (listenerPid(port) !== pid) {
+    log(`adopted dsh pid ${pid} no longer owns port ${port} — leaving it alone`);
+    if (cb) cb();
+    return;
+  }
+  log(`killing adopted dsh pid ${pid}`);
+  if (process.platform === "win32") {
+    let done = false;
+    const finish = () => {
+      if (!done) {
+        done = true;
+        if (cb) cb();
+      }
+    };
+    try {
+      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true
+      });
+      killer.on("close", finish);
+      killer.on("error", finish);
+      setTimeout(finish, 3000);
+    } catch {
+      finish();
+    }
+  } else {
+    // Not our child and not a process-group leader we created: signal the
+    // single process (its own children die with it or linger as before).
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* already gone */
+    }
+    setTimeout(() => { if (cb) cb(); }, 2000);
   }
 }
 

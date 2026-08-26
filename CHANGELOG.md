@@ -6,6 +6,23 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.4.4] - 2026-08-27
+
+### 修复
+
+- **dsh-market「重启」与壳冲突（点击后壳无法在原端口启动）**：当用户在 profile 里**自行安装**了 dshmarket
+  （`dsh.profile.bundles` 含 `dshmarket`），壳按「用户自己的拷贝优先」原则完全跳过市场挂载行——于是
+  `allowRestart: false` 配置也随之丢失，市场的「重启」按钮处于激活状态。点击后市场的 detached helper
+  会 spawn 一个脱离壳生命周期的替身核心抢占原端口：壳把旧进程退出误报成「进程已退出」崩溃面板，点重试
+  又因端口被替身占用而报「端口已被占用」，陷入死锁。修复（两道防线）：① `prepareBundledMarket()`
+  （原 `stageBundledMarket()`）检测到用户自装市场时仍生成一条**普通 `- id:` 覆盖行**（非 `- insert:`，
+  不会重复挂载；附 `name` 守卫），强制 `config.allowRestart: false`——已用真实 `dsh --dump-config`
+  验证组合结果恰好一行且配置生效；② 纵深防御：核心意外退出且此前已成功启动时，壳先探测原端口
+  `ADOPT_RESTART_GRACE_MS`（12s），若替身核心起来了就**收养**它（记录监听 PID、窗口直接 reload 到原
+  地址），不再弹崩溃面板；`killDSH()` 会带守卫地清理被收养的进程（`killAdoptedDSH`：仅当记录的 PID 仍
+  是该端口监听者时才 taskkill），壳的重启/更新/退出路径因此对替身核心同样有效。已知限制：被收养的进程
+  没有 exit 事件监听，它之后再死掉由 `did-fail-load` 兜底回错误面板。
+
 ## [1.4.3] - 2026-08-23
 
 ### 新增
