@@ -81,10 +81,29 @@ const INSTALL_STALL_MS = (() => {
  * the user retries.
  */
 const ADOPT_RESTART_GRACE_MS = 12000;
+/**
+ * How long a RESTART chain waits for the just-killed core's port to be
+ * released before falling back to the port-in-use panel. TerminateProcess
+ * release is normally immediate, but a big process tree (or AV scanning it)
+ * can lag seconds — flashing "端口已被占用" mid-restart is exactly the
+ * "manual restart sometimes fails" flake. Cold starts never wait: for them
+ * an occupied port means a FOREIGN process and belongs in the panel.
+ */
+const PORT_RELEASE_WAIT_MS = 10000;
 
 let mainWindow = null;
 let dshProc = null;
 let dshUrl = null;
+/**
+ * Generation counter for spawned DSH cores. EVERY deferred decision taken on
+ * behalf of a core (its exit report, the adopt probe, openDSH) must carry the
+ * serial of the core it speaks for and re-check spawnSerial before acting:
+ * a manual restart / update kills the old core and spawns a new one, and the
+ * old core's late "exit" event or its still-running 12s adopt probe would
+ * otherwise paint a crash panel over a healthy restart — or worse, ADOPT the
+ * replacement core the shell spawned itself (adoptedPid corruption).
+ */
+let spawnSerial = 0;
 /**
  * PID of an externally restarted DSH core the shell ADOPTED (it owns the port
  * but is not our child — no exit events, no stdio). Tracked so killDSH /
@@ -1303,28 +1322,60 @@ function installWithRetry(cb) {
 // ---- DSH lifecycle ---------------------------------------------------------
 function spawnDSH() {
   ensureDSH((found) => {
-    if (!found || quitRequested) return;
+    if (!found || quitRequested) {
+      // Chain aborted before any child existed — release the restart guard
+      // so a later Ctrl+Alt+R / panel retry can re-enter.
+      restartRequested = false;
+      return;
+    }
     // Pre-flight port check: if the target port is already taken (another DSH
     // or program), give the user the choice to switch ports instead of failing
     // with an opaque error.
     const port = effectivePort();
+    const portBusyPanel = () => {
+      log(`port ${port} in use — asking user to switch`);
+      restartRequested = false; // chain aborted at the port pre-flight
+      showStartupError({
+        message: `端口 ${port} 已被占用`,
+        detail: `另一个 DeepSeek Harness 或程序正在使用 ${port} 端口。\n你可以换一个空闲端口后重试，或先关闭占用该端口的程序。`,
+        canChangePort: true
+      });
+    };
     isPortFree(port).then((free) => {
       if (quitRequested) return;
-      if (!free) {
-        log(`port ${port} in use — asking user to switch`);
-        showStartupError({
-          message: `端口 ${port} 已被占用`,
-          detail: `另一个 DeepSeek Harness 或程序正在使用 ${port} 端口。\n你可以换一个空闲端口后重试，或先关闭占用该端口的程序。`,
-          canChangePort: true
-        });
+      if (free) {
+        doSpawn(found);
         return;
       }
-      doSpawn(found);
+      if (!restartRequested) {
+        portBusyPanel();
+        return;
+      }
+      // Restart chain: the port was held by the core killDSH JUST killed.
+      // Wait briefly for its release instead of flashing the port-in-use
+      // panel at the user mid-restart (see PORT_RELEASE_WAIT_MS).
+      const deadline = Date.now() + PORT_RELEASE_WAIT_MS;
+      const recheck = () => {
+        if (quitRequested) { restartRequested = false; return; }
+        isPortFree(port).then((free2) => {
+          if (quitRequested) { restartRequested = false; return; }
+          if (free2) { doSpawn(found); return; }
+          if (Date.now() < deadline) { setTimeout(recheck, 400); return; }
+          portBusyPanel();
+        });
+      };
+      log(`port ${port} not released yet after restart kill — waiting briefly`);
+      setTimeout(recheck, 400);
     });
   });
 }
 
 function doSpawn(found) {
+  // This call site is now the CURRENT generation: bumping the serial here
+  // invalidates every deferred decision (exit report / adopt probe /
+  // openDSH) still pending for the PREVIOUS core — a restart or update has
+  // already replaced it, so its death must stay silent.
+  const serial = ++spawnSerial;
   const { bin, base } = found;
   const runtime = dshRuntime();
   // The DSH core requires Node >= 22.15 (node:zlib zstd APIs — the 1.2.0
@@ -1332,6 +1383,7 @@ function doSpawn(found) {
   // dshRuntime(); only the embedded Electron-Node fallback can be too old, so
   // refuse loudly instead of a cryptic boot crash.
   if (!runtimeSupportsDsh(runtime)) {
+    restartRequested = false; // chain aborted: allow a later retry to re-enter
     showStartupError({
       message: "内置运行时版本过低",
       detail: `DSH 核心需要 Node.js ≥ 22.15（node:zlib zstd API），当前壳内嵌 Node ${process.versions.node}。\n请升级桌面壳版本，或设 DSH_DESKTOP_NODE 指向一个 ≥22.15 的 Node 二进制。\n\n最近日志：\n${logTail.slice(-20).join("\n")}`,
@@ -1367,6 +1419,14 @@ function doSpawn(found) {
     windowsHide: true
   });
   dshProc = child;
+  // The fresh child now owns its own lifecycle reporting. restartRequested
+  // deliberately stays raised from restartDSH() until THIS point (not just
+  // until killDSH's callback): the killed core's "exit" event can be
+  // delivered after the callback already ran, and without the flag the late
+  // exit would read as a fresh crash ("启动失败" panel mid-restart). It also
+  // keeps a second Ctrl+Alt+R during the async spawn chain (ensureDSH →
+  // isPortFree → here) from double-spawning two cores that race for the port.
+  restartRequested = false;
 
   let buffer = "";
   const feed = (chunk) => {
@@ -1382,6 +1442,9 @@ function doSpawn(found) {
   child.stderr.on("data", feed);
   child.on("error", (err) => {
     log(`spawn error: ${err.message}`);
+    // No "exit" event follows a spawn failure — release the restart guard so
+    // the panel's retry can re-enter.
+    restartRequested = false;
     showStartupError({
       message: `无法启动 DSH：${err.message}`,
       detail: `最近日志：\n${logTail.slice(-20).join("\n")}`,
@@ -1396,12 +1459,18 @@ function doSpawn(found) {
     if (quitRequested || restartRequested || isUpdating) return;
     const tail = logTail.slice(-25).join("\n");
     const portConflict = /EADDRINUSE|address already in use|already in use/i.test(tail);
-    const report = () => showStartupError({
-      message: hadStarted ? "DeepSeek Harness 进程已退出" : "DeepSeek Harness 启动失败",
-      detail: `退出码：${code ?? "无"}\n\n最近日志：\n${tail}`,
-      canChangePort: portConflict || !hadStarted,
-      suggestPort: portConflict ? null : undefined
-    });
+    const report = () => {
+      // Superseded: a restart/update already spawned a newer core (or is
+      // mid-chain towards one). THIS core's death must not paint a crash
+      // panel over the in-flight restart — the new generation owns the UX.
+      if (restartRequested || serial !== spawnSerial) return;
+      showStartupError({
+        message: hadStarted ? "DeepSeek Harness 进程已退出" : "DeepSeek Harness 启动失败",
+        detail: `退出码：${code ?? "无"}\n\n最近日志：\n${tail}`,
+        canChangePort: portConflict || !hadStarted,
+        suggestPort: portConflict ? null : undefined
+      });
+    };
     // A plugin may have restarted the core OUT-OF-BAND — dshmarket's
     // one-click self-restart SIGTERMs this process and brings up a detached
     // replacement on the SAME port seconds later. (The shell force-disables
@@ -1414,7 +1483,14 @@ function doSpawn(found) {
     const port = effectivePort();
     const url = `http://127.0.0.1:${port}`;
     probeServerUp(url, ADOPT_RESTART_GRACE_MS, (up) => {
-      if (!up || quitRequested) { report(); return; }
+      // The user may have pressed Ctrl+Alt+R (or an update restarted the
+      // core) while this probe was polling — the port answering then belongs
+      // to OUR OWN new child, never to an external replacement. Adopting it
+      // would record the shell's own child in adoptedPid and fire a second
+      // openDSH racing waitForServerThenOpen; reporting would paint a crash
+      // panel over a healthy restart. Stale probes stay silent.
+      if (quitRequested || restartRequested || serial !== spawnSerial || dshProc) return;
+      if (!up) { report(); return; }
       adoptedPid = listenerPid(port);
       dshUrl = url;
       log(`adopted externally restarted DSH at ${url} (pid ${adoptedPid ?? "unknown"})`);
@@ -1508,7 +1584,10 @@ function probeServerUp(url, deadlineMs, cb) {
     else done(false);
   };
   const attempt = () => {
-    if (quitRequested) return done(false);
+    // A restart/update taking over (restartRequested) ends the probe early:
+    // whatever binds the port next is OUR OWN new core, not an external
+    // replacement — the decision belongs to the restart chain, not us.
+    if (quitRequested || restartRequested) return done(false);
     const req = http.get(url, (res) => {
       res.resume();
       if (res.statusCode !== undefined && res.statusCode < 400) done(true);
@@ -1621,11 +1700,17 @@ function killAdoptedDSH(cb) {
 }
 
 function restartDSH() {
-  if (restartRequested) return;
+  // isUpdating: an install in progress ends with its OWN restartDSH() — a
+  // manual Ctrl+Alt+R here would kill the mid-install state and its splash.
+  if (restartRequested || isUpdating) return;
   restartRequested = true;
   log("restarting DSH…");
   killDSH(() => {
-    restartRequested = false;
+    // NOTE: restartRequested stays TRUE from here until doSpawn() assigns the
+    // fresh child — resetting it here (as before) re-opened two races: the
+    // killed core's late "exit" event arrived after this callback and painted
+    // a "启动失败" panel mid-restart, and a second Ctrl+Alt+R during the
+    // async spawn chain double-spawned two cores racing for the port.
     dshUrl = null;
     clearWatchdog();
     if (mainWindow && !mainWindow.isDestroyed()) {

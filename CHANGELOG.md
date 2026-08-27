@@ -6,6 +6,18 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [Unreleased]
+
+## [1.4.5] - 2026-08-27
+
+### 修复
+
+- **手动 Ctrl+Alt+R 重启不稳定（v1.4.4 引入的回归）**：v1.4.4 的「收养探测」与既有的重启守卫之间存在三个竞态窗口，导致手动重启时好时坏——中途闪「进程已退出/启动失败」崩溃面板、窗口闪烁乱跳、或报「端口已被占用」。根因与修复（引入**核心代际号 `spawnSerial`**，所有延迟决策必须确认自己仍代表当前代际）：
+  - **过期收养探测劫持手动重启**：核心意外退出后 exit 处理器对原端口轮询 12s（`probeServerUp`），回调只检查 `quitRequested`。用户按 Ctrl+Alt+R 重启后，新核心一绑上端口就被旧探测误认成「外部替身」——`adoptedPid` 记成壳自己的亲儿子、抢跑设 `dshUrl` 并再次 `openDSH`（与 `waitForServerThenOpen` 双重 `loadURL`）；若新核心绑端口晚于探测截止，又在正常重启中途弹崩溃面板。修复：探测回调与 `report()` 均校验 `restartRequested`/代际号/`dshProc`，过期探测一律静默；`probeServerUp` 轮询中发现重启接管即提前退出。
+  - **迟到的 exit 事件误报崩溃**：`restartDSH` 原在 `killDSH` 回调里立刻清 `restartRequested`，而被杀核心的 `exit` 事件可能晚于此到达——守卫全 false、`dshUrl` 已清空，误弹「启动失败」面板。修复：`restartRequested` 从按下快捷键起一直保持到 `doSpawn()` 真正拿到新 child 才清除。
+  - **连按两次 Ctrl+Alt+R 双 spawn 抢端口**：`restartRequested` 在异步 spawn 链（`ensureDSH`→`isPortFree`→`doSpawn`）期间原已复位，第二条链并发启动两个核心抢端口，输家 EADDRINUSE 又触发上面两条。修复：同上——重启标志覆盖整条链，链上所有中止路径（runtime 版本不足、端口预检失败、spawn error、找不到安装）与成功路径都会释放标志，重试永不悬挂；另加 `isUpdating` 守卫防止更新进行中的手动重启打断安装流程自身的重启链。
+  - **重启后端口短暂未释放直接弹「端口已被占用」**：taskkill 杀大进程树（或杀软扫描）时端口释放可能滞后数秒，重启链的端口预检撞上就闪面板。修复：**重启链内**（`restartRequested` 保持期间）端口被占改为等待释放（最长 `PORT_RELEASE_WAIT_MS` = 10s，400ms 轮询）再 spawn，超时才弹面板；**冷启动不等待**——对它而言被占端口就是外部进程，直接弹面板换端口。
+
 ## [1.4.4] - 2026-08-27
 
 ### 修复
