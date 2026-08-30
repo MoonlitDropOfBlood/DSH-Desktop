@@ -213,6 +213,7 @@
   .kp p { font-size: 14px; color: var(--ink-2); }
 
   /* ---------- features ---------- */
+  .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
   /* 奇数张卡片时最后一张通栏，避免单卡孤行 */
   .features .feature:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .feature {
