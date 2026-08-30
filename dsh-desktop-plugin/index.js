@@ -10,14 +10,17 @@
  *
  * Mapped events:
  *   - agent/status running -> idle  : MAIN agent completed (subagents skipped)
- *   - agent/error                  : task failed
- *   - approval/request (waterfall) : confirmation needed
+ *   - agent/error                  : MAIN agent failed (subagents skipped)
+ *   - approval/request (waterfall) : MAIN agent needs confirmation
  *
- * Completion notification policy: only the MAIN (top-level) agent's
- * running -> idle transition posts "done". Subagents complete constantly, so
- * their transitions are filtered out via the session header — a subagent's
- * header carries `parentSession` / `origin: "subagent"` / `delegationDepth >= 1`
- * while the main agent's header has none of those.
+ * Notification policy: ONLY the MAIN (top-level) agent of a session may
+ * notify — every channel filters subagents out. Subagents complete/fail
+ * constantly and their approvals are auto-rejected, so their events are
+ * noise. The filter reads the session header: a subagent's header carries
+ * `parentSession` / `origin: "subagent"` / `delegationDepth >= 1` while the
+ * main agent's header has none of those. All three events are scope-routed
+ * and always carry the subject agent (`agent/status` & `agent/error` in the
+ * payload, `approval/request` as `req.agent`).
  */
 
 const PORT = process.env.DSH_DESKTOP_NOTIFY_PORT || "34951";
@@ -80,19 +83,25 @@ module.exports = {
       }
     });
 
-    // task failed
-    ctx.on("agent/error", () => {
+    // MAIN agent failed. Subagent errors are contained by their delegating
+    // parent (surfaced as tool results), so they never notify.
+    ctx.on("agent/error", (payload) => {
       try {
+        if (isSubagent(payload && payload.agent)) return;
         post("error", "任务运行出错。");
       } catch {
         /* ignore */
       }
     });
 
-    // confirmation needed (waterfall: must call next)
+    // confirmation needed (waterfall: must call next). Only the MAIN agent's
+    // approvals notify — subagent approval requests are auto-rejected by the
+    // host and must never pop a notification.
     ctx.on("approval/request", (req, next) => {
       try {
-        post("approval", "有操作需要你确认。");
+        if (!isSubagent(req && req.agent)) {
+          post("approval", "有操作需要你确认。");
+        }
       } catch {
         /* ignore */
       }

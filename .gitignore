@@ -10,4 +10,5 @@ build/.node-tmp-*/
 build/market-plugin/
 build/pnpm/
 *.log
+!scripts/.testdata/*.log
 *.tgz

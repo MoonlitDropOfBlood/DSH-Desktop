@@ -27,7 +27,11 @@ dsh-desktop/
 │   ├── make-tray-icon.js   # 用 @resvg/resvg-js 从 whale.svg 生成各尺寸图标
 │   ├── fetch-market-plugin.js # 下载内置插件市场 dshmarket 到 build/market-plugin/
 │   ├── fetch-pnpm.js       # 下载 pin 版本的 pnpm 到 build/pnpm/（DSH 核心的安装器）
-│   └── embed-exe-icon.js   # 本机无法解压 winCodeSign 时，用 rcedit 手动嵌 exe 图标
+│   ├── embed-exe-icon.js   # 本机无法解压 winCodeSign 时，用 rcedit 手动嵌 exe 图标
+│   ├── repro-restart-race.js  # 独立实测"taskkill → 端口释放"时序（需非沙箱）
+│   ├── repro-plugin-failure.js # 抓取插件故障的真实核心日志格式（需非沙箱）
+│   ├── test-plugin-recovery.js # plugin-recovery.js 解析器单测 + .testdata 回归
+│   └── e2e-plugin-recovery.js  # 插件故障自动恢复全链路 e2e（需非沙箱）
 └── build/
     ├── market-plugin/      # 内置插件市场（gitignore；打包时经 files 随 app 分发）
     ├── whale.svg           # DeepSeek 鲸鱼矢量源（从 DSH FishLogo 提取）
@@ -119,6 +123,19 @@ window.__ModuleLoader__.load({
 - **`allowRestart: false` 必须带，对用户自装的市场也不例外（实测大坑）**：插件自带的"重启 DSH"会 spawn 一个 detached helper，先 SIGTERM 当前核心、等端口释放后重放原启动命令拉起替身核心——全程绕过 Electron 壳的生命周期管理：壳把原进程退出误判成崩溃弹错误面板，替身抢占原端口后壳的任何重试都撞"端口已被占用"死锁，且替身是孤儿进程、壳退出后仍残留。因此：壳暂存挂载时用 `- insert:` 行带 `config.allowRestart: false`；**用户自装时**用普通 `- id: dsh-market` 覆盖行（带 `name: 'dshmarket'` 守卫）强制同值——覆盖是**整对象替换**该行 `config`（`applyEntryPatches` 逐 key 赋值、无深合并），dshmarket 自带挂载行本无 config，其余配置键（`profile`/`maxSnapshots`）都有 argv/默认值兜底，安全。市场设置页里有 `allowRestart` 开关可被用户显式重新打开（其值经 `installSettingsSection` 的 `onChange` 直接写回运行时配置）——那是用户知情选择，由下一条的收养机制兜底。壳有自己的 DSH 重启机制（`restartDSH`/更新流程/菜单 CmdOrCtrl+Alt+R）。
 - **纵深防御：收养外部重启的核心（exit 处理器）**：`dshProc` 意外退出**且此前已成功启动**时，不立即弹崩溃面板，先探测原端口 `ADOPT_RESTART_GRACE_MS`（12s）——若替身核心起来了则**收养**：`listenerPid()` 记录监听 PID（Windows 解析 `netstat -ano` / POSIX `lsof`），`dshUrl` 指回原地址、窗口直接 reload。收养后 `killDSH()` 经 `killAdoptedDSH()` 清理：**带守卫**——仅当记录的 PID 仍是该端口监听者时才 `taskkill /T /F`（防 PID 复用误杀无关进程），壳的重启/更新/退出路径因此对替身同样有效。已知限制：被收养进程没有 exit 事件监听，它之后再死掉靠 `did-fail-load` 兜底回错误面板；探测 12s 超时（替身没起来=真崩溃）按原逻辑弹崩溃面板，行为不回归。
 - **收养探测必须做代际校验（v1.4.5 大坑，勿改回）**：收养探测是 12s 的**长延迟决策**，而它的存活窗口内用户很可能按 Ctrl+Alt+R 手动重启——重启拉起的新核心一绑上端口就会被旧探测误认成"外部替身"收养（`adoptedPid` 记成壳自己的亲儿子 + 双重 `openDSH` 抢跑闪烁），绑端口晚于探测截止则反过来在正常重启中途弹"进程已退出"崩溃面板——这就是 v1.4.4 后"手动 Ctrl+Alt+R 刷新不稳定"的根因。规则：**每次 `doSpawn` 递增 `spawnSerial`（核心代际号），exit 处理器里的 `report()` 与收养探测回调都是延迟决策，行动前必须校验自己仍代表当前代际**（`quitRequested || restartRequested || serial !== spawnSerial || dshProc` 任一命中即静默放弃）；`probeServerUp` 轮询中发现重启接管（`restartRequested`）也提前退出。配套地，**`restartRequested` 从 `restartDSH()` 入口一直保持到 `doSpawn()` 真正拿到新 child 才清除**（勿改回在 `killDSH` 回调里清——被杀核心的 exit 事件可能晚于该回调到达，守卫全 false 时误弹"启动失败"；且异步 spawn 链期间标志提前复位会让连按两次快捷键并发起两条链、两个核心抢端口，输家 EADDRINUSE 又喂给收养探测）。链上所有中止路径（runtime 过旧、端口预检失败、spawn error、找不到安装）与成功路径都必须释放标志，保证错误面板的「重试」永不悬挂；`restartDSH` 另带 `isUpdating` 守卫（更新流程结尾有自己的 restartDSH，别被手动重启打断）。
+- **被杀核心的 exit 事件晚于新核心的 `doSpawn` 到达是常态而非例外（e2e 实测 8/8 全中）**：重启链里 `loadFile`(splash) + `resolveDSHBin`/`prepareDesktopPlugin` 的同步 IO 拥堵主事件循环，libuv 的 child-wait 回调排队，旧核心的 `exit` 平均晚几十~几百 ms 送达（极端环境可任意延迟，独立复现脚本里 stdio:'ignore' 时 30s 内都没送达）。因此 **exit 处理器里的任何状态变更都必须先过身份/代际守卫**：`if (dshProc === child) dshProc = null`（否则把新核心的簿记清掉——新核心变孤儿，下一次重启无子可杀、端口被它一直占着，"端口已被占用"必现且之后的重启全挂——v1.4.5 后"偶发端口被占用"的残留根因）、`if (serial !== spawnSerial) return` 之后才允许 `clearWatchdog()`（否则缴掉新核心的启动看门狗）。
+- **taskkill 可能静默失败，必须有兜底**：`killDSH` 检查 taskkill 退出码（"not found"/"access denied" 时 `close` 照常触发），非零记日志并回退 `child.kill("SIGKILL")` 直杀；重启链端口等待（`PORT_RELEASE_WAIT_MS`）期间，若 `listenerPid()` 发现占用者仍是**刚被杀的那个 pid**（`lastKilledPid`——壳持有其子进程句柄、pid 不会被复用，无误杀风险），每 2.5s 重新 taskkill 一次自愈。POSIX 侧不再盲等 2s：200ms 轮询进程组存活（`-pid` 信号 0），死了立刻继续，2s 未死升级 SIGKILL。
+- **主进程日志持久化**：`log()` 同时写 `<userData>/dsh-desktop-main.log`（启动时 >1MB 轮转为 `.old`）——打包版没有控制台，没有它任何重启 flake 事后零证据。"端口已被占用"面板附带占用进程 PID（`listenerPid()`）。
+- **重启链路 e2e 回归钩子**：`DSH_DESKTOP_E2E_RESTARTS="N[,ms]"`（env）让应用在每次 `openDSH` 后自动跑 N 次真实 `restartDSH()`（生产绝不设置；配合 `DSH_DESKTOP_USER_DATA`/`DSH_DESKTOP_HOME`/`DSH_DESKTOP_PORT` 全隔离）。`scripts/repro-restart-race.js` 独立实测"taskkill → 端口释放"时序（空闲核心实测 ~370ms；注意沙箱内 taskkill 会被 ACL 拒绝，需非沙箱运行）。
+- **插件故障自动恢复（`plugin-recovery.js` + exit 处理器接线，"DSH 被玩坏"时的自愈）**：核心**启动期**被插件加载失败杀死时，壳解析日志找出罪魁插件、自动卸载、重启，成功后弹蓝色信息面板列出被卸载的插件。要点（全部有实测依据，勿凭猜改动）：
+  - **故障日志格式（core 0.1.1-rc.2 实测，`scripts/repro-plugin-failure.js` 抓取，全量样本在 `scripts/.testdata/`）**：模块语法错/apply 抛错/多插件同时挂，统一形如 `failed to import|apply loader entry <name> (<spec>): <err>`（[cause] 链会嵌套重复同一条目，需去重；链首固定是根包装条目 `include (cordis:include)`，**必须排除**）；bundle 缺失/清单非法形如 `cannot resolve profile bundle "X"` / `profile bundle "X" declares no dsh.bundle`。这些故障全部**快速 exit 1**（不挂死）；另有源码级兜底模式 `plugin(s) failed to load: a, b` 与 `N entries did not activate\n<name>: <stack>`（条目行零缩进、stack 续行有缩进）。
+  - **证据窗口两条铁律**：① 只解析**本代核心自己的输出**——`doSpawn` 记 `child.logStart = logTail.length`，exit 时从该处切片（上一轮的失败日志还在 logTail 里，绝不能让它们误判后续无关退出）；② 只取**末尾 80 行**——运行期 HMR 热重载用户补丁失败的措辞与启动失败**完全相同**，但之后会有大量正常日志，限尾窗可排除。
+  - **罪魁 → bundle 映射**：条目名 == 包名或为 `<pkg>/` 前缀直接命中 `dsh.profile.bundles`；否则读各 bundle 的 `dsh.bundle.patch` 文件里的 `name:` 挂载名做归因。**`@deepseek-ai/*` 系统插件只报告、绝不自动卸载**（修它们靠核心更新，profile 编辑修不了）。
+  - **卸载 = 同时从 `dsh.profile.bundles` 和 `dependencies` 移除**（只删 bundles 会被下次 `dsh plugin` 安装时的 reconcile 按已装包重新挂载）；node_modules 里的文件留着不管（pnpm 可自行 prune）。原子写（tmp+rename）。
+  - **两个特例**：罪魁是 `dshmarket` → 除卸载外必须 `bundleMarket:false`，否则壳下次 spawn 会把内置市场重新暂存挂载、等于没卸；罪魁是壳自己的 `dsh-desktop-plugin` → 该代生成的 patch 不带它的挂载行（窗口控制由 main.js 的兜底控制条接管），patch 无任何行时干脆不传 `--patch`。
+  - **预算**：每壳会话最多 `PLUGIN_RECOVERY_MAX`（4）次自动恢复；系统插件/无法归因/超预算/证据为空都落回原来的错误面板（日志尾部照常展示）。
+  - **成功后的提示**：`openDSH` 拦截——`removed.length > notifiedCount` 时先弹 splash 面板（`tone:"info"` 蓝色样式 + 「进入 DeepSeek Harness」按钮，`startupChoice` 的 `continue` 动作放行 stash 的 URL），每批卸载只提示一次。
+  - **测试**：`scripts/test-plugin-recovery.js`（内嵌真实日志摘录的单测 + 对 `.testdata/` 全量样本的回归）；`scripts/e2e-plugin-recovery.js` 全链路 e2e（隔离环境预置两个坏插件 → 自动卸载 → 重启成功 → 面板日志标记）。
 - **用户已自行安装时绝不重复挂载**（大坑）：Cordis 的 `- insert:` 是**无条件追加**（源码见 `dsh-app-boot` 的 `applyEntryPatches`），同 id 再插一行会把插件**挂载两次**（服务/UI 全重复）。所以挂载前先检测 profile 是否已挂载 dshmarket：`profiles/web/package.json` 的 `dsh.profile.bundles` 含 `"dshmarket"`，或 `cordis.patch.yml` 文本含 `dshmarket`——命中则**不暂存、不 insert**，只追加上一条所述的 `allowRestart: false` 覆盖行（普通 `- id:` 行作用于已有条目，不会新增；用户手写行若换了 id，覆盖行找不到目标、loader 只警告跳过，无害）。此检测**先于** `bundleMarket` 开关——开关只管壳暂存的拷贝，生命周期保护不因开关关闭而缺席。
 - **开关**：设置"内置插件市场"（`bundleMarket`，默认开，存 `update-settings.json`）关掉后不再暂存/挂载——用户在 profile 里卸载市场后靠它避免壳自动装回。改动**重启 DSH 生效**（patch 每次 spawn 才重组装）。
 - profile 的 node_modules 可能被 pnpm 管理，pnpm prune 会清掉壳暂存的"外来"拷贝——无妨，下次 spawn DSH 会重新暂存（自愈）。
@@ -131,9 +148,9 @@ window.__ModuleLoader__.load({
 | `dsh:update-state` 事件 | 主进程→渲染进程 | 推送版本/设置状态给插件 UI |
 | **通知桥** `http://127.0.0.1:<随机端口>` | DSH Host 进程→Electron 主进程 | 任务通知（主 agent 完成 `agent/status` / `agent/error` / `approval/request` 转发） |
 
-任务通知：插件 **Host 半部**（index.js，运行在 DSH 进程里）监听 `agent/status`(running→idle=完成，**仅主 agent**)、`agent/error`(失败)、`approval/request`(waterfall，需调 next)，POST 到主进程的本地 HTTP 桥，主进程弹 `Notification`。
-**subagent 完成不通知**（频繁完成，逐个弹窗是噪音）——subagent 的 session header 带
-`parentSession`/`origin:'subagent'`/`delegationDepth≥1`，据此过滤；只有**主 agent** 完成、失败、需要确认才弹。
+任务通知：插件 **Host 半部**（index.js，运行在 DSH 进程里）监听 `agent/status`(running→idle=完成)、`agent/error`(失败)、`approval/request`(waterfall，需调 next)，POST 到主进程的本地 HTTP 桥，主进程弹 `Notification`。
+**只有主会话（主 agent）才能通知**——三个事件通道全部经 `isSubagent()` 过滤：subagent 的 session header 带
+`parentSession`/`origin:'subagent'`/`delegationDepth≥1`（核心 `dsh-subagent` 创建子会话时写入），据此过滤；subagent 频繁完成、错误由父 agent 收容、审批被宿主自动拒绝，逐个弹窗全是噪音。三个事件都是 scope 路由事件、必然携带主体 agent（`agent/status`/`agent/error` 在 payload 上，`approval/request` 在 `req.agent` 上），过滤可靠。只有**主 agent** 完成、失败、需要确认才弹。
 
 **通知桥安全（重要）**：
 - **焦点抑制**：桌面窗口**有焦点且可见时不弹通知**（用户正在看 DSH，任务状态已内联显示；弹原生通知只是噪音），只在后台/最小化/藏托盘时才通知。判断：`mainWindow.isVisible() && isFocused() && !isMinimized()`。
@@ -276,3 +293,4 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_NPM` | 覆盖 npm 回退路径要 spawn 的 npm 可执行文件绝对路径（仅 pnpm 缺失的回退时用） |
 | `DSH_DESKTOP_MARKET_VERSION` | `scripts/fetch-market-plugin.js` 下载的 dshmarket 版本（默认 1.15.0） |
 | `DSH_DESKTOP_PNPM_VERSION` | `scripts/fetch-pnpm.js` 下载的内置 pnpm 版本（默认 10.33.0） |
+| `DSH_DESKTOP_E2E_RESTARTS` | e2e 回归钩子：`"N[,ms]"` 让应用每次打开 DSH 页后自动执行 N 次真实重启链（生产绝不设置；配合 USER_DATA/HOME/PORT 全隔离用） |

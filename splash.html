@@ -94,6 +94,10 @@
     padding: 18px 20px;
   }
   #errorPanel.visible { display: block; }
+  /* info variant (e.g. plugin auto-recovery notice) — calm blue, not alarm red */
+  #errorPanel.info { background: #0d1424; border-color: #1f3a5f; }
+  #errorPanel.info .error-icon { color: #6fb3ff; }
+  #errorPanel.info #errorTitle { color: #8fc3ff; }
   .error-icon {
     font-size: 22px; line-height: 1;
     color: #ff6b6b; margin-bottom: 10px;
@@ -228,6 +232,9 @@
 
       bridge.onStartupError(function (info) {
         if (!info) return;
+        var isInfo = info.tone === "info";
+        errorPanel.classList.toggle("info", isInfo);
+        document.querySelector("#errorPanel .error-icon").innerHTML = isInfo ? "&#x2139;" : "&#x26A0;";
         errorTitle.textContent = info.message || "启动失败";
         errorDetail.textContent = info.detail || "";
         var hasChangePort = !!info.canChangePort;
@@ -242,7 +249,7 @@
           btn.type = "button";
           btn.className = "act";
           if (a.id === "quit") btn.className += " danger";
-          else if (a.id === "retry" || a.id === "installRetry") btn.className += " primary";
+          else if (a.id === "retry" || a.id === "installRetry" || a.id === "continue") btn.className += " primary";
           btn.textContent = a.label || a.id;
           btn.addEventListener("click", function () {
             errorPanel.classList.remove("visible");
@@ -251,14 +258,16 @@
           errorActions.appendChild(btn);
         });
         btnCopy.hidden = false;
-        btnCopy.textContent = "复制错误信息";
+        copyBaseLabel = isInfo ? "复制详情" : "复制错误信息";
+        btnCopy.textContent = copyBaseLabel;
         errorPanel.classList.add("visible");
         spinnerEl.classList.add("hidden");
         statusEl.textContent = info.message || "启动失败";
-        setErrorClass(true);
+        setErrorClass(!isInfo);
       });
 
       // copy the full crash text (message + detail + live log) to the clipboard
+      var copyBaseLabel = "复制错误信息";
       btnCopy.addEventListener("click", function () {
         var text = errorTitle.textContent + "\n\n" + errorDetail.textContent +
           "\n\n--- 最近日志 ---\n" + logEl.textContent;
@@ -266,7 +275,7 @@
           if (bridge.copyText) bridge.copyText(text);
           else if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
           btnCopy.textContent = "已复制 ✓";
-          setTimeout(function () { btnCopy.textContent = "复制错误信息"; }, 1500);
+          setTimeout(function () { btnCopy.textContent = copyBaseLabel; }, 1500);
         } catch (err) {
           btnCopy.textContent = "复制失败";
         }

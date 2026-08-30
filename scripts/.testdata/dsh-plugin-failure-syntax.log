@@ -1,0 +1,57 @@
+file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+dsh-app-boot@0_7542cc99ae2cdab20b00c36735a4ec06/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:1187
+		throw new Error(`${binName}: ${stage}: ${detail}${stack}`, { cause });
+		      ^
+
+Error: dsh: plugin tree failed to load: failed to apply loader entry include (cordis:include): failed to import loader entry dsh-broken-syntax (dsh-broken-syntax): Unexpected identifier 'is'
+C:\Users\wwhby\AppData\Local\Temp\dsh-plugfail-B4fz2T\profiles\web\node_modules\dsh-broken-syntax\index.js:1
+module.exports = { apply( {  this is not javascript
+                                  ^^
+
+SyntaxError: Unexpected identifier 'is'
+    at wrapSafe (node:internal/modules/cjs/loader:1804:18)
+    at Module._compile (node:internal/modules/cjs/loader:1846:20)
+    at Object..js (node:internal/modules/cjs/loader:2003:10)
+    at Module.load (node:internal/modules/cjs/loader:1594:32)
+    at Module._load (node:internal/modules/cjs/loader:1396:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:372:15)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:244:9)
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at boot (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+dsh-app-boot@0_7542cc99ae2cdab20b00c36735a4ec06/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:1187:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async runProfile (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+dsh@0.1.1-rc.2_7adf779e9bedfb2e97ced92905792931/node_modules/@deepseek-ai/dsh/lib/profile-boot-DG5t9aNs.js:247:14)
+    at async file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+dsh@0.1.1-rc.2_7adf779e9bedfb2e97ced92905792931/node_modules/@deepseek-ai/dsh/lib/bin.js:133:3 {
+  [cause]: Error: failed to apply loader entry include (cordis:include): failed to import loader entry dsh-broken-syntax (dsh-broken-syntax): Unexpected identifier 'is'
+      at updateError (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:299:9)
+      at Entry._init (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:519:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+    [cause]: Error: failed to import loader entry dsh-broken-syntax (dsh-broken-syntax): Unexpected identifier 'is'
+        at updateError (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:299:9)
+        at Entry._init (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:514:10)
+        at async Entry.init (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:495:4)
+        at async Entry.update (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:416:37)
+        at async EntryGroup.create (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:55:4)
+        at async Promise.allSettled (index 135)
+        at async EntryGroup.update (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+cordis-plugin-_6bbed33e411487075eb8aac91da6ecf2/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:87:21)
+        at async Include._apply (file:///C:/Users/wwhby/AppData/Roaming/DeepSeek%20Harness%20Desktop/dsh/node_modules/.pnpm/@deepseek-ai+dsh-app-boot@0_7542cc99ae2cdab20b00c36735a4ec06/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:238:3) {
+      [cause]: C:\Users\wwhby\AppData\Local\Temp\dsh-plugfail-B4fz2T\profiles\web\node_modules\dsh-broken-syntax\index.js:1
+      module.exports = { apply( {  this is not javascript
+                                        ^^
+      
+      SyntaxError: Unexpected identifier 'is'
+          at wrapSafe (node:internal/modules/cjs/loader:1804:18)
+          at Module._compile (node:internal/modules/cjs/loader:1846:20)
+          at Object..js (node:internal/modules/cjs/loader:2003:10)
+          at Module.load (node:internal/modules/cjs/loader:1594:32)
+          at Module._load (node:internal/modules/cjs/loader:1396:12)
+          at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+          at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:372:15)
+          at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:244:9)
+          at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+          at async node:internal/modules/esm/loader:643:26
+    }
+  }
+}
+
+Node.js v24.19.0

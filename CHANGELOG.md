@@ -8,6 +8,20 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-29
+
+### 修复
+
+- **任务通知严格限定主会话**：此前只有 `agent/status`（完成）通道过滤了 subagent，`agent/error`（失败）与 `approval/request`（待确认）未过滤——subagent 的报错/审批也会弹原生通知。三个事件通道现在全部经 `isSubagent()`（session header 的 `parentSession`/`origin:"subagent"`/`delegationDepth≥1`）过滤，只有主会话的主 agent 完成、失败、需要确认才弹通知。
+- **Ctrl+Alt+R 重启偶发「端口已被占用」（v1.4.5 残留竞态）**：v1.4.5 给 exit 处理器的面板/收养探测加了代际校验，但**漏掉了对 `dshProc = null` 与 `clearWatchdog()` 的守卫**——实测（e2e 自动重启 ×8 + 独立复现脚本）被杀核心的 `exit` 事件**经常晚于**新核心的 `doSpawn` 才送达（重启链的 loadFile/同步 IO 拥堵主事件循环，libuv 的 child-wait 回调排队），旧代码于是把 `dshProc` 误清——新核心变成簿记孤儿：**下一次重启无子进程可杀，端口被它一直占用 → 必现「端口已被占用」**。修复：exit 处理器的状态变更先校验身份（`dshProc === child`）与代际（`serial === spawnSerial`），迟到的 exit 完全无害化。
+- **taskkill 静默失败无兜底**：`killDSH` 原来不看 taskkill 的退出码（"not found"/"access denied" 也照常走流程），旧核心没被杀死时 10s 端口等待只能干等。修复：① taskkill 非零退出码/启动失败时记日志并回退 `child.kill()` 直接终止；② 重启链端口等待期间，若占用者仍是**刚被杀的那个 pid**（壳持有其子进程句柄，pid 不会被复用，无误杀风险），每 2.5s 重新 taskkill 一次自愈；③ POSIX 侧改为 200ms 轮询进程组存活（死了立刻继续，不再盲等 2s），2s 未死升级 SIGKILL。
+- **错误面板/日志可诊断化**：主进程日志现在持久化到 `<userData>/dsh-desktop-main.log`（>1MB 启动时轮转为 .old）——打包版没有控制台，此前每次重启 flake 过后无任何证据可查；「端口已被占用」面板现在附带占用进程的 PID。
+
+### 新增
+
+- **插件故障自动恢复（DSH 被玩坏时自愈）**：核心因插件加载失败而无法启动时（实测 rc.2：bundle 缺失 / 模块语法错误 / `apply()` 抛错全部快速 exit 1，日志形如 `failed to import/apply loader entry <name> (<name>): …`、`cannot resolve profile bundle "X"`），壳现在会：① 从**该代核心自己的输出**（`child.logStart` 起、末尾 80 行——运行期 HMR 补丁报错措辞相同但不会触发）解析出故障插件名；② 映射回 profile bundle（包名/子路径前缀 + 解析各 bundle 的 `dsh.bundle.patch` 挂载名），**DSH 自带的 `@deepseek-ai/*` 系统插件一律排查在外、绝不自动卸载**；③ 自动卸载——从 profile `package.json` 的 `dsh.profile.bundles` **和** `dependencies` 同时移除（只删 bundles 会被下次 `dsh plugin` 的 reconcile 重新挂载）；④ 自动重启核心；⑤ 启动成功后弹出蓝色信息面板，明确列出被卸载的插件及处置说明，确认后进入 UI。特例：罪魁是 `dshmarket` 时额外关闭「内置插件市场」开关（否则壳下次 spawn 会重新暂存挂载）；罪魁是壳自己的 `dsh-desktop-plugin` 时该代不带其挂载行启动（窗口控制由内置备用按钮条兜底）。预算：每壳会话最多 4 次自动恢复，系统插件/无法归因/超预算时落回错误面板。
+- 开发/回归钩子：`DSH_DESKTOP_E2E_RESTARTS="N[,ms]"` 环境变量让应用在每次打开 DSH 页面后自动执行 N 次真实重启链（配合 `DSH_DESKTOP_USER_DATA`/`DSH_DESKTOP_HOME`/`DSH_DESKTOP_PORT` 隔离使用）；`scripts/repro-restart-race.js` 可独立实测核心被杀后的端口释放时序；`scripts/repro-plugin-failure.js`（抓取四类插件故障的真实日志格式）、`scripts/test-plugin-recovery.js`（解析器单测，含真实日志回归）、`scripts/e2e-plugin-recovery.js`（自动恢复全链路 e2e）。
+
 ## [1.4.5] - 2026-08-27
 
 ### 修复
