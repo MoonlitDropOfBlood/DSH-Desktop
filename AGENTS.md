@@ -31,7 +31,8 @@ dsh-desktop/
 │   ├── repro-restart-race.js  # 独立实测"taskkill → 端口释放"时序（需非沙箱）
 │   ├── repro-plugin-failure.js # 抓取插件故障的真实核心日志格式（需非沙箱）
 │   ├── test-plugin-recovery.js # plugin-recovery.js 解析器单测 + .testdata 回归
-│   └── e2e-plugin-recovery.js  # 插件故障自动恢复全链路 e2e（需非沙箱）
+│   ├── e2e-plugin-recovery.js  # 插件故障自动恢复全链路 e2e（需非沙箱）
+│   └── check-docs-page.js      # 宣传页回归守卫：内联脚本语法解析 + 全文表情符号扫描（页面硬性要求零 emoji）
 └── build/
     ├── market-plugin/      # 内置插件市场（gitignore；打包时经 files 随 app 分发）
     ├── whale.svg           # DeepSeek 鲸鱼矢量源（从 DSH FishLogo 提取）
@@ -260,6 +261,13 @@ npm run dist:linux   # Linux AppImage（会自动 fetch market + pnpm）
   - **③ 彻底解决（付费 Apple Developer 账号）**：Developer ID 证书 + 公证 `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`（或 `APPLE_API_KEY`/`APPLE_API_KEY_ID`/`APPLE_API_ISSUER`，注意 25.1.8 读的是 `APPLE_API_ISSUER` 不是 `APPLE_API_KEY_ISSUER`）；配齐后 electron-builder 自动签名+notarytool 公证（`hardenedRuntime` 默认已开，见 macPackager.js:328）。**签名凭据与公证凭据要配就配全套**，只配一半会构建失败。
   - 没任何证书的临时绕过（给用户）：右键→打开，或 `xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness Desktop.app"`。
 - asar 内容验证：`node node_modules/@electron/asar/bin/asar.js list dist/win-unpacked/resources/app.asar`。
+
+## 宣传页（docs/index.html，GitHub Pages）约定
+
+- **硬性要求：全文零表情符号**——图标一律内联 SVG（Lucide 风格 24×24 stroke），窗口控制符号用纯 CSS 画。改完跑 `node scripts/check-docs-page.js`（内联脚本语法解析 + 表情码点扫描，任一不过即失败）。
+- **版本与更新日志自动获取，发版无需改页面**：浏览器端 fetch `https://api.github.com/repos/MoonlitDropOfBlood/DSH-Desktop/releases/latest`（CORS 开放，按访客 IP 限速 60 次/时，够用），成功后：hero 版本号（词典里用 `{ver}` 占位）、下载区「最新版本」卡片（发布日期按当前语言本地化、发布说明经内置迷你 Markdown 渲染器 `mdToHtml` 渲染，支持 `##/###` 标题、`-` 列表、粗体、行内代码、链接）、六个下载按钮改指**最新资产直链**（按文件名模式匹配：`.exe` / `arm64.dmg` / 其余 `.dmg` / `.AppImage` / `.deb` / `.rpm`，附带文件大小 title）。**API 失败/离线时保留静态兜底内容**（兜底版本号手动维护，发版时顺手更新 `latestVer` 与 `rel.fallback`）。
+- 中英双语：所有文案走 `data-i18n` + `I18N` 词典（含 HTML 的字符串用 innerHTML 写入），`localStorage["dsh-desktop-lang"]` 记忆、浏览器语言自动检测。新增文案必须双语同步加 key。
+- 视觉验证：无头 Edge 截图（`--headless=new --screenshot=<绝对路径> --window-size=1440,N --virtual-time-budget=8000`，需非沙箱；**相对路径的 --screenshot 不生效**，锚点滚动截图因 `scroll-behavior:smooth` 会出空白，用 `--dump-dom` 验证动态内容更可靠）。
 
 ## 任务通知编码坑（重要）
 

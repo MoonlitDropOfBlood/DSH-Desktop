@@ -4,181 +4,345 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DeepSeek Harness Desktop — 为 DeepSeek Harness 打造的桌面端体验</title>
-<meta name="description" content="把 DeepSeek Harness（DSH）包装成原生桌面应用：窗口、托盘、更新与桌面运行环境，完整保留官方 DSH 的智能体、模型、工具、会话与 Web UI。DSH 核心不打进安装包，零依赖运行，跨平台。">
+<meta name="description" content="把 DeepSeek Harness（DSH）包装成原生桌面应用：无边框窗口、托盘、自动更新、内置插件市场与插件故障自愈。DSH 核心不打进安装包，零依赖运行，跨平台。">
 <meta property="og:title" content="DeepSeek Harness Desktop">
-<meta property="og:description" content="为 DeepSeek Harness 打造的桌面端体验：窗口、托盘、自动更新，DSH 核心零打包、零依赖运行。">
+<meta property="og:description" content="为 DeepSeek Harness 打造的桌面端体验：无边框窗口、托盘、自动更新、插件市场与故障自愈，DSH 核心零打包、零依赖运行。">
 <meta property="og:type" content="website">
 <style>
   :root {
-    --dsh-blue: #4d6bfe;
-    --dsh-blue-dark: #3a55e0;
-    --dsh-bg: #f6f8ff;
-    --dsh-ink: #101828;
-    --dsh-ink-2: #475467;
-    --dsh-ink-3: #667085;
-    --dsh-border: #e4e7f2;
-    --dsh-card: #ffffff;
-    --dsh-green: #22c55e;
-    --dsh-amber: #f59e0b;
+    --bg: #070b16;
+    --bg-2: #0b1120;
+    --card: rgba(17, 25, 46, 0.62);
+    --card-solid: #101a30;
+    --border: #1c2742;
+    --border-hi: #31437a;
+    --ink: #e7ebf5;
+    --ink-2: #a7b1c8;
+    --ink-3: #6d7891;
+    --blue: #4d6bfe;
+    --blue-hi: #7aa0ff;
+    --blue-deep: #2f49c8;
+    --cyan: #53c8ff;
+    --glow: rgba(77, 107, 254, 0.45);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
+  html { scroll-behavior: smooth; }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
       "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-    color: var(--dsh-ink);
-    background: var(--dsh-bg);
-    line-height: 1.6;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
 
-  a { color: var(--dsh-blue); text-decoration: none; }
+  a { color: var(--blue-hi); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  code {
+    background: rgba(77,107,254,0.14); border: 1px solid rgba(77,107,254,0.25);
+    border-radius: 5px; padding: 1px 7px; font-size: 0.88em; color: var(--blue-hi);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
 
-  .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
-  /* ---------- Navbar ---------- */
+  /* ---------- background texture ---------- */
+  .bg-fx {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(720px 380px at 50% -80px, rgba(77,107,254,0.22), transparent 70%),
+      radial-gradient(560px 320px at 88% 220px, rgba(83,200,255,0.07), transparent 70%),
+      radial-gradient(640px 420px at 6% 560px, rgba(77,107,254,0.08), transparent 70%),
+      var(--bg);
+  }
+  .bg-fx::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(120,140,200,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,140,200,0.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 75%);
+  }
+
+  /* ---------- navbar ---------- */
   .nav {
     position: sticky; top: 0; z-index: 50;
-    background: rgba(255,255,255,0.85);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--dsh-border);
+    background: rgba(7, 11, 22, 0.78);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
   }
-  .nav .container { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--dsh-ink); }
-  .brand img, .brand svg { width: 26px; height: auto; }
-  .brand .tag { font-weight: 400; font-size: 12px; color: var(--dsh-ink-3); }
-  .nav-links { display: flex; align-items: center; gap: 18px; font-size: 14px; }
-  .nav-links a { color: var(--dsh-ink-2); font-weight: 500; }
-  .nav-links a:hover { color: var(--dsh-blue); text-decoration: none; }
+  .nav .container { display: flex; align-items: center; justify-content: space-between; height: 62px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink); }
+  .brand:hover { text-decoration: none; }
+  .brand svg { width: 27px; height: auto; }
+  .brand .tag { font-weight: 400; font-size: 12px; color: var(--ink-3); }
+  .nav-links { display: flex; align-items: center; gap: 20px; font-size: 14px; }
+  .nav-links a { color: var(--ink-2); font-weight: 500; }
+  .nav-links a:hover { color: var(--ink); text-decoration: none; }
   .lang-switch {
-    font-size: 13px; font-weight: 600; color: var(--dsh-blue);
-    background: #fff; border: 1px solid var(--dsh-blue); border-radius: 999px;
-    padding: 4px 14px; cursor: pointer; transition: background .2s ease, color .2s ease;
+    font-size: 12.5px; font-weight: 600; color: var(--blue-hi);
+    background: rgba(77,107,254,0.1); border: 1px solid rgba(77,107,254,0.4);
+    border-radius: 999px; padding: 4px 15px; cursor: pointer;
+    transition: background .2s ease, color .2s ease, border-color .2s ease;
   }
-  .lang-switch:hover { background: var(--dsh-blue); color: #fff; }
+  .lang-switch:hover { background: var(--blue); border-color: var(--blue); color: #fff; }
 
-  /* ---------- Hero ---------- */
-  .hero {
-    background: linear-gradient(160deg, #ffffff 0%, #eef2ff 55%, #e4ebff 100%);
-    border-bottom: 1px solid var(--dsh-border);
-    padding: 72px 0 64px;
-    text-align: center;
+  /* ---------- hero ---------- */
+  .hero { padding: 84px 0 30px; text-align: center; position: relative; }
+  .hero .whale { width: 88px; height: auto; margin-bottom: 24px; filter: drop-shadow(0 10px 34px var(--glow)); }
+  .hero h1 { font-size: 52px; font-weight: 800; letter-spacing: -1.2px; line-height: 1.12; }
+  .hero h1 .accent {
+    background: linear-gradient(100deg, var(--blue-hi) 0%, var(--blue) 45%, var(--cyan) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  .hero .whale { width: 84px; height: auto; margin-bottom: 20px; }
-  .hero h1 { font-size: 42px; font-weight: 800; letter-spacing: -0.5px; }
-  .hero h1 .accent { color: var(--dsh-blue); }
-  .hero .sub { margin-top: 14px; font-size: 18px; color: var(--dsh-ink-2); max-width: 640px; margin-left: auto; margin-right: auto; }
-  .hero .badges { margin-top: 22px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .hero .sub { margin: 18px auto 0; font-size: 17.5px; color: var(--ink-2); max-width: 680px; }
+  .hero .sub b { color: var(--ink); font-weight: 600; }
+  .hero .badges { margin-top: 24px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
   .hero .badge {
-    font-size: 12.5px; font-weight: 600; color: var(--dsh-ink-2);
-    background: #fff; border: 1px solid var(--dsh-border); border-radius: 999px;
-    padding: 5px 14px;
+    font-size: 12.5px; font-weight: 500; color: var(--ink-2);
+    background: rgba(17,25,46,0.7); border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 15px;
   }
-  .hero .badge.blue { color: #fff; background: var(--dsh-blue); border-color: var(--dsh-blue); }
+  .hero .badge.blue { color: #fff; background: linear-gradient(120deg, var(--blue), var(--blue-deep)); border-color: transparent; }
   .hero .cta { margin-top: 34px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
   .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 15px; font-weight: 600; padding: 12px 26px; border-radius: 10px;
-    transition: transform .08s ease, box-shadow .2s ease, background .2s ease;
+    display: inline-flex; align-items: center; gap: 9px;
+    font-size: 15px; font-weight: 600; padding: 13px 28px; border-radius: 11px;
+    transition: transform .12s ease, box-shadow .25s ease, background .2s ease, border-color .2s ease;
   }
-  .btn:hover { text-decoration: none; transform: translateY(-1px); }
-  .btn-primary { background: var(--dsh-blue); color: #fff; box-shadow: 0 6px 18px rgba(77,107,254,0.35); }
-  .btn-primary:hover { background: var(--dsh-blue-dark); }
-  .btn-ghost { background: #fff; color: var(--dsh-ink); border: 1px solid var(--dsh-border); }
-  .btn-ghost:hover { border-color: var(--dsh-blue); color: var(--dsh-blue); }
-  .hero .hint { margin-top: 16px; font-size: 13px; color: var(--dsh-ink-3); }
+  .btn svg { width: 16px; height: 16px; }
+  .btn:hover { text-decoration: none; transform: translateY(-2px); }
+  .btn-primary {
+    background: linear-gradient(120deg, var(--blue) 0%, var(--blue-deep) 100%);
+    color: #fff; box-shadow: 0 10px 30px rgba(77,107,254,0.4);
+  }
+  .btn-primary:hover { box-shadow: 0 14px 38px rgba(77,107,254,0.55); }
+  .btn-ghost { background: rgba(17,25,46,0.6); color: var(--ink); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--border-hi); color: #fff; }
+  .hero .hint { margin-top: 18px; font-size: 13px; color: var(--ink-3); }
 
-  /* ---------- Sections ---------- */
-  section { padding: 64px 0; }
-  .section-title { text-align: center; margin-bottom: 40px; }
-  .section-title h2 { font-size: 30px; font-weight: 800; }
-  .section-title p { margin-top: 10px; color: var(--dsh-ink-2); max-width: 640px; margin-left: auto; margin-right: auto; }
+  /* ---------- CSS window mockup ---------- */
+  .mock-wrap { padding: 56px 0 10px; }
+  .mock {
+    position: relative; max-width: 880px; margin: 0 auto;
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border-hi);
+    background: var(--bg-2);
+    box-shadow: 0 40px 90px rgba(2,6,18,0.8), 0 0 0 1px rgba(77,107,254,0.08), 0 0 80px rgba(77,107,254,0.12);
+  }
+  .mock-body { display: flex; height: 340px; text-align: left; }
+  .mock-side {
+    width: 168px; flex: none; border-right: 1px solid var(--border);
+    background: rgba(10,15,29,0.8); padding: 14px 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .mock-side .ms-brand { display: flex; align-items: center; gap: 8px; padding: 2px 6px 10px; }
+  .mock-side .ms-brand svg { width: 20px; height: auto; }
+  .mock-side .ms-brand .bar { height: 8px; width: 62px; border-radius: 4px; background: #233158; }
+  .mock-side .item { height: 26px; border-radius: 7px; background: transparent; display: flex; align-items: center; padding: 0 9px; }
+  .mock-side .item i { display: block; height: 7px; border-radius: 4px; background: #1d2a4d; }
+  .mock-side .item.active { background: rgba(77,107,254,0.16); }
+  .mock-side .item.active i { background: #4d6bfe; }
+  .mock-main { flex: 1; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; position: relative; }
+  .mock-head { height: 20px; display: flex; align-items: center; gap: 8px; }
+  .mock-head .bar { height: 8px; border-radius: 4px; background: #233158; }
+  .mock-msg { display: flex; gap: 10px; align-items: flex-start; }
+  .mock-msg .avatar { width: 26px; height: 26px; border-radius: 8px; flex: none; }
+  .mock-msg .avatar.a { background: linear-gradient(135deg, #2c3f7e, #1a2750); }
+  .mock-msg .avatar.b { background: linear-gradient(135deg, var(--blue), var(--cyan)); }
+  .mock-msg .lines { flex: 1; display: flex; flex-direction: column; gap: 7px; padding-top: 3px; }
+  .mock-msg .lines i { display: block; height: 8px; border-radius: 4px; background: #1b2747; }
+  .mock-msg .lines i.w60 { width: 60%; } .mock-msg .lines i.w85 { width: 85%; }
+  .mock-msg .lines i.w40 { width: 40%; } .mock-msg .lines i.w70 { width: 70%; }
+  .mock-input {
+    margin-top: auto; height: 38px; border-radius: 10px;
+    border: 1px solid var(--border-hi); background: rgba(13,20,38,0.9);
+    display: flex; align-items: center; padding: 0 14px;
+  }
+  .mock-input i { display: block; height: 8px; width: 45%; border-radius: 4px; background: #22305a; }
+  .mock-input .send {
+    margin-left: auto; width: 22px; height: 22px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+  }
+  /* frameless control strip (the overlay the desktop plugin renders) */
+  .mock-controls {
+    position: absolute; top: 0; right: 0; height: 34px;
+    display: flex; align-items: flex-start; z-index: 3;
+    background: linear-gradient(180deg, rgba(11,17,32,0.92), rgba(11,17,32,0));
+    padding: 0 6px; border-bottom-left-radius: 12px;
+  }
+  .mock-controls span {
+    width: 40px; height: 34px; display: flex; align-items: center; justify-content: center;
+  }
+  .mock-controls i { display: block; position: relative; }
+  .mock-controls .min i { width: 11px; height: 1.6px; background: #8b97b5; border-radius: 1px; }
+  .mock-controls .max i { width: 9px; height: 9px; border: 1.6px solid #8b97b5; border-radius: 2px; }
+  .mock-controls .cls i { width: 12px; height: 1.6px; background: #8b97b5; border-radius: 1px; transform: rotate(45deg); }
+  .mock-controls .cls i::after { content: ""; position: absolute; inset: 0; background: inherit; border-radius: inherit; transform: rotate(90deg); }
+  .mock-caption { margin-top: 18px; font-size: 13px; color: var(--ink-3); }
 
-  /* ---------- Key points ---------- */
-  .keypoints { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  /* ---------- sections ---------- */
+  section { padding: 76px 0; }
+  .section-title { text-align: center; margin-bottom: 46px; }
+  .section-title .eyebrow {
+    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 2.5px;
+    text-transform: uppercase; color: var(--blue-hi); margin-bottom: 12px;
+  }
+  .section-title h2 { font-size: 33px; font-weight: 800; letter-spacing: -0.6px; }
+  .section-title p { margin: 12px auto 0; color: var(--ink-2); max-width: 660px; font-size: 15.5px; }
+
+  /* ---------- key points ---------- */
+  .keypoints { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
   .kp {
-    background: var(--dsh-card); border: 1px solid var(--dsh-border); border-radius: 14px;
-    padding: 26px 24px; text-align: center;
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 30px 26px; text-align: left;
+    transition: transform .15s ease, border-color .2s ease, box-shadow .25s ease;
   }
-  .kp .icon { width: 46px; height: 46px; margin: 0 auto 14px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
-  .kp h3 { font-size: 17px; margin-bottom: 8px; }
-  .kp p { font-size: 14px; color: var(--dsh-ink-2); }
-  .ic-blue { background: #e8edff; }
-  .ic-green { background: #e6f7ec; }
-  .ic-amber { background: #fdf1e3; }
+  .kp:hover { transform: translateY(-3px); border-color: var(--border-hi); box-shadow: 0 18px 44px rgba(2,6,18,0.5); }
+  .kp .icon {
+    width: 46px; height: 46px; margin-bottom: 18px; border-radius: 13px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(77,107,254,0.13); border: 1px solid rgba(77,107,254,0.28);
+  }
+  .kp .icon svg { width: 22px; height: 22px; stroke: var(--blue-hi); }
+  .kp h3 { font-size: 16.5px; margin-bottom: 9px; font-weight: 700; }
+  .kp p { font-size: 14px; color: var(--ink-2); }
 
-  /* ---------- Features ---------- */
-  .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  /* ---------- features ---------- */
+  /* 奇数张卡片时最后一张通栏，避免单卡孤行 */
+  .features .feature:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .feature {
-    background: var(--dsh-card); border: 1px solid var(--dsh-border); border-radius: 14px;
-    padding: 26px 26px 24px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 26px 26px 24px; display: flex; gap: 16px; align-items: flex-start;
+    transition: transform .15s ease, border-color .2s ease;
   }
-  .feature.wide { grid-column: 1 / -1; }
-  .feature h3 { font-size: 17px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
-  .feature h3 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsh-blue); flex: none; }
-  .feature p { font-size: 14.5px; color: var(--dsh-ink-2); }
+  .feature:hover { transform: translateY(-2px); border-color: var(--border-hi); }
+  .feature .icon {
+    flex: none; width: 42px; height: 42px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(77,107,254,0.1); border: 1px solid rgba(77,107,254,0.22);
+  }
+  .feature .icon svg { width: 20px; height: 20px; stroke: var(--blue-hi); }
+  .feature h3 { font-size: 16px; margin-bottom: 7px; font-weight: 700; }
+  .feature p { font-size: 14px; color: var(--ink-2); }
+  .feature .pill {
+    display: inline-block; margin-left: 8px; vertical-align: 2px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px;
+    color: var(--cyan); border: 1px solid rgba(83,200,255,0.4);
+    background: rgba(83,200,255,0.08); border-radius: 999px; padding: 1px 9px;
+  }
 
-  /* ---------- Download ---------- */
-  .download { background: #fff; border-top: 1px solid var(--dsh-border); }
-  .platforms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  /* ---------- download ---------- */
+  .download { background: linear-gradient(180deg, transparent, rgba(77,107,254,0.05) 30%, transparent); }
+  .platforms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
   .platform {
-    border: 1px solid var(--dsh-border); border-radius: 14px; padding: 24px;
-    background: var(--dsh-bg); display: flex; flex-direction: column; gap: 14px;
+    border: 1px solid var(--border); border-radius: 16px; padding: 28px 24px;
+    background: var(--card); display: flex; flex-direction: column; gap: 8px;
+    transition: transform .15s ease, border-color .2s ease, box-shadow .25s ease;
   }
-  .platform .os { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
-  .platform .os .emoji { font-size: 22px; }
-  .platform .formats { font-size: 13px; color: var(--dsh-ink-3); }
-  .platform .links { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
+  .platform:hover { transform: translateY(-3px); border-color: var(--border-hi); box-shadow: 0 18px 44px rgba(2,6,18,0.5); }
+  .platform .os { display: flex; align-items: center; gap: 11px; font-weight: 700; font-size: 17px; }
+  .platform .os svg { width: 22px; height: 22px; }
+  .platform .formats { font-size: 13px; color: var(--ink-3); min-height: 40px; }
+  .platform .links { display: flex; flex-direction: column; gap: 9px; margin-top: auto; padding-top: 12px; }
   .platform .links a {
-    font-size: 13.5px; font-weight: 600; color: var(--dsh-blue);
-    border: 1px solid var(--dsh-border); background: #fff; border-radius: 9px;
-    padding: 9px 14px; text-align: center;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 13.5px; font-weight: 600; color: var(--ink);
+    border: 1px solid var(--border); background: rgba(10,15,29,0.6); border-radius: 10px;
+    padding: 10px 14px; transition: border-color .2s ease, background .2s ease, color .2s ease;
   }
-  .platform .links a:hover { border-color: var(--dsh-blue); background: #f0f4ff; text-decoration: none; }
-  .dl-note { margin-top: 26px; font-size: 13px; color: var(--dsh-ink-3); text-align: center; }
+  .platform .links a svg { width: 14px; height: 14px; stroke: var(--blue-hi); }
+  .platform .links a:hover { border-color: var(--blue); background: rgba(77,107,254,0.12); color: #fff; text-decoration: none; }
+  .platform .links a.primary { background: linear-gradient(120deg, var(--blue), var(--blue-deep)); border-color: transparent; color: #fff; }
+  .platform .links a.primary svg { stroke: #fff; }
+  .dl-note { margin-top: 28px; font-size: 13px; color: var(--ink-3); text-align: center; }
 
-  /* ---------- How / env ---------- */
-  .how-list { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
-  .how-item {
-    background: var(--dsh-card); border: 1px solid var(--dsh-border); border-radius: 12px;
-    padding: 18px 22px; display: flex; gap: 16px; align-items: flex-start;
+  /* ---------- latest release card ---------- */
+  .release-card {
+    margin-top: 30px; border: 1px solid var(--border); border-radius: 16px;
+    background: var(--card); overflow: hidden; text-align: left;
   }
+  .rel-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap; padding: 15px 22px;
+    border-bottom: 1px solid var(--border); background: rgba(77,107,254,0.07);
+  }
+  .rel-title { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
+  .rel-title svg { width: 16px; height: 16px; stroke: var(--blue-hi); }
+  .rel-tag {
+    background: linear-gradient(120deg, var(--blue), var(--blue-deep)); color: #fff;
+    border-radius: 7px; padding: 2px 11px; font-size: 12.5px; font-weight: 700;
+    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  }
+  .rel-date { color: var(--ink-3); font-size: 12.5px; }
+  .rel-all { font-size: 13px; font-weight: 500; }
+  .rel-body { padding: 6px 22px 16px; max-height: 330px; overflow: auto; font-size: 13.5px; color: var(--ink-2); }
+  .rel-body h4 {
+    margin: 15px 0 7px; font-size: 12px; font-weight: 700; letter-spacing: 1.6px;
+    text-transform: uppercase; color: var(--blue-hi);
+  }
+  .rel-body ul { padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+  .rel-body li::marker { color: var(--blue); }
+  .rel-body p { margin: 8px 0; }
+  .rel-body strong { color: var(--ink); font-weight: 650; }
+  .rel-body code { font-size: 0.86em; }
+
+  /* ---------- how ---------- */
+  .how-list { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  .how-item {
+    background: var(--card); border: 1px solid var(--border); border-radius: 13px;
+    padding: 18px 22px; display: flex; gap: 18px; align-items: flex-start;
+    transition: border-color .2s ease;
+  }
+  .how-item:hover { border-color: var(--border-hi); }
   .how-item .n {
-    flex: none; width: 30px; height: 30px; border-radius: 50%;
-    background: var(--dsh-blue); color: #fff; font-weight: 700; font-size: 14px;
+    flex: none; width: 30px; height: 30px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+    color: #fff; font-weight: 700; font-size: 14px;
     display: flex; align-items: center; justify-content: center;
   }
-  .how-item p { font-size: 14.5px; color: var(--dsh-ink-2); }
-  .how-item b { color: var(--dsh-ink); }
+  .how-item p { font-size: 14.5px; color: var(--ink-2); }
+  .how-item b { color: var(--ink); }
 
-  table.env { width: 100%; border-collapse: collapse; margin-top: 30px; font-size: 13.5px; background: #fff; }
-  table.env th, table.env td { border: 1px solid var(--dsh-border); padding: 10px 14px; text-align: left; }
-  table.env th { background: #f0f4ff; font-weight: 600; }
-  table.env td code { background: #eef2ff; border-radius: 5px; padding: 2px 7px; font-size: 12.5px; color: var(--dsh-blue-dark); font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  table.env {
+    width: 100%; border-collapse: collapse; margin-top: 34px; font-size: 13.5px;
+    background: var(--card-solid); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  }
+  table.env th, table.env td { border-bottom: 1px solid var(--border); padding: 11px 16px; text-align: left; }
+  table.env tr:last-child td { border-bottom: none; }
+  table.env th { background: rgba(77,107,254,0.1); font-weight: 600; color: var(--ink); }
 
-  /* ---------- Footer ---------- */
-  footer { border-top: 1px solid var(--dsh-border); background: #fff; padding: 40px 0 48px; }
-  .footer-inner { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
-  .footer-links { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; font-size: 14px; }
-  .footer-links a { color: var(--dsh-ink-2); }
-  footer .note { font-size: 12.5px; color: var(--dsh-ink-3); max-width: 720px; }
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--border); background: rgba(9,13,25,0.7); padding: 44px 0 52px; }
+  .footer-inner { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+  .footer-brand svg { width: 30px; height: auto; opacity: 0.9; }
+  .footer-links { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; font-size: 14px; }
+  .footer-links a { color: var(--ink-2); }
+  .footer-links a:hover { color: var(--ink); }
+  footer .note { font-size: 12.5px; color: var(--ink-3); max-width: 720px; }
 
-  @media (max-width: 820px) {
+  @media (max-width: 860px) {
     .keypoints, .platforms { grid-template-columns: 1fr; }
     .features { grid-template-columns: 1fr; }
-    .hero h1 { font-size: 32px; }
+    .hero { padding-top: 60px; }
+    .hero h1 { font-size: 36px; }
+    .mock-body { height: 280px; }
+    .mock-side { width: 132px; }
     .nav .tag { display: none; }
   }
 </style>
 </head>
 <body>
+<div class="bg-fx" aria-hidden="true"></div>
 
 <nav class="nav">
   <div class="container">
     <a class="brand" href="./">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23.16 17.04" fill="#4d6bfe" aria-label="DeepSeek Harness Desktop"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23.16 17.04" fill="#4d6bfe" aria-label="DeepSeek Harness Desktop"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.4688 12.5075 7.80482 12.701C8.21534 12.939 8.68486 13.1145 9.13937 13.2935C9.99889 13.626 10.8699 13.891 11.7719 14.0845C12.1529 14.168 12.5409 14.2255 12.9319 14.2475C13.2159 14.2655 13.4969 14.2475 13.7679 14.1485C14.0034 14.0645 14.1689 13.885 14.2349 13.639C14.3019 13.3895 14.2639 13.15 14.1619 12.922C13.9989 12.5675 13.7609 12.2735 13.4619 12.0315C13.2104 11.826 12.9399 11.646 12.6579 11.488C11.4249 10.82 10.1139 10.3145 8.74386 9.94447C8.06085 9.75646 7.37484 9.59546 6.68283 9.45846C5.77481 9.28195 4.8698 9.24095 3.95429 9.18345C3.17928 9.13495 2.41127 9.07945 1.67376 8.84694C1.48526 8.78894 1.30176 8.71594 1.12476 8.63144C1.05626 8.59744 0.979761 8.57844 0.907261 8.55394C0.841261 8.53044 0.748261 8.49644 0.731261 8.42344C0.706261 8.32244 0.813261 8.28944 0.875261 8.26494C1.03826 8.19944 1.20526 8.14494 1.37276 8.09744C1.63176 8.02444 1.89176 7.95744 2.15827 7.91094C2.77728 7.79994 3.39328 7.71294 4.02629 7.70144C5.21481 7.67844 6.33782 8.03544 7.44384 8.48595C8.31285 8.84595 9.14887 9.27096 9.94588 9.76697C10.4869 10.096 11.0099 10.4535 11.5109 10.84C11.6469 10.944 11.7699 11.063 11.9049 11.1665C12.0199 11.2535 12.1429 11.329 12.2459 11.4325C12.3489 11.5335 12.3379 11.607 12.2464 11.692C12.0059 11.9185 11.7509 12.1305 11.4959 12.3385C11.2439 12.544 10.9849 12.741 10.7169 12.922C10.5019 13.066 10.2789 13.1965 10.0479 13.3095C9.73438 13.4645 9.41137 13.5895 9.07136 13.6605C8.71936 13.735 8.36635 13.777 8.00834 13.7665C6.93682 13.7345 5.93231 13.401 5.04479 12.844C4.31278 12.39 3.67777 11.807 3.21026 11.0555C2.64125 10.1525 2.35475 9.16496 2.34175 8.11144C2.33375 7.47894 2.43025 6.86144 2.62625 6.26543C2.82225 5.67243 3.10175 5.12442 3.45576 4.63142C3.71176 4.27392 4.00277 3.94692 4.32777 3.65642C4.54677 3.45592 4.77878 3.27042 5.02428 3.10292C5.10128 3.04942 5.18128 3.00242 5.26278 2.95742C5.32278 2.92392 5.39128 2.89742 5.45428 2.86292C5.58128 2.79192 5.58028 2.72392 5.45928 2.64742C5.16777 2.46242 4.87477 2.28142 4.57276 2.11642C4.17576 1.90192 3.76175 1.72092 3.33324 1.57242C3.14974 1.50942 2.96224 1.45642 2.77374 1.40542C2.70124 1.38642 2.62624 1.37242 2.55224 1.35542C2.48824 1.34142 2.42124 1.32992 2.35924 1.30942C2.20624 1.26042 2.16324 1.14292 2.24674 1.01042C2.33424 0.872418 2.45274 0.762915 2.57874 0.661413C2.91175 0.389906 3.28175 0.177903 3.68726 0.0278957C3.85926 -0.0326062 4.03776 0.0113955 4.21077 0.0568968C4.78427 0.210904 5.31978 0.466915 5.82778 0.769424C6.53079 1.17843 7.1768 1.66944 7.78431 2.20545C7.94581 2.35146 8.10481 2.50046 8.26231 2.65096C8.46331 2.84097 8.67232 3.02297 8.88432 3.20198C9.36783 3.61899 9.86784 4.015 10.3858 4.38402C10.9244 4.76703 11.4799 5.12504 12.0514 5.45606C12.3549 5.63856 12.6629 5.81407 12.9739 5.98207C13.3139 6.16408 13.6569 6.33958 14.0034 6.50659C14.2114 6.60459 14.4214 6.69609 14.6329 6.7851C14.7549 6.8361 14.8779 6.8836 15.0019 6.9281C15.0919 6.9596 15.1829 6.9896 15.2739 7.0181C15.3389 7.0376 15.4059 7.0551 15.4709 7.0736C15.5599 7.0996 15.6299 7.0706 15.6679 6.9901C15.6959 6.9296 15.7019 6.8636 15.7069 6.7976C15.7169 6.6756 15.7099 6.5536 15.6969 6.4326C15.6689 6.18359 15.6149 5.93959 15.5359 5.70108C15.3829 5.23357 15.1659 4.79556 14.8969 4.38655C14.6829 4.06254 14.4349 3.76504 14.1644 3.49054C13.9944 3.31404 13.8124 3.14903 13.6239 2.99203C13.5499 2.93003 13.4749 2.86953 13.4009 2.80853C13.3549 2.77003 13.3079 2.73253 13.2629 2.69353C13.2299 2.66453 13.1959 2.63653 13.1649 2.60553C13.0669 2.50903 13.0819 2.42003 13.1839 2.35703C13.3089 2.28003 13.4409 2.21603 13.5769 2.16103C13.9599 2.01003 14.3559 1.89903 14.7609 1.82203C15.2169 1.73553 15.6759 1.67903 16.1389 1.65803C16.4549 1.64403 16.7709 1.66203 17.0849 1.70803C17.1989 1.72553 17.3129 1.74653 17.4259 1.77203C17.4899 1.78653 17.5539 1.80253 17.6169 1.82053C17.6679 1.83453 17.7189 1.85003 17.7679 1.86903C17.8629 1.90603 17.8939 1.97253 17.8599 2.06453C17.8239 2.16253 17.7719 2.25253 17.7119 2.33553C17.5299 2.57854 17.3209 2.79904 17.0899 2.99505C16.8949 3.15905 16.6859 3.30755 16.4689 3.44506C16.2709 3.57106 16.0669 3.68656 15.8574 3.79307C15.7624 3.83807 15.6654 3.87907 15.5684 3.92007C15.5094 3.94407 15.4494 3.96657 15.3894 3.98957C15.3474 4.00507 15.3049 4.01957 15.2639 4.03707C15.2059 4.06207 15.1739 4.10807 15.1819 4.16907C15.1929 4.24507 15.2299 4.31407 15.2749 4.37657C15.4439 4.61258 15.6469 4.81708 15.8714 4.99808C16.0959 5.17908 16.3384 5.33658 16.5944 5.47059C16.7564 5.55259 16.9229 5.62559 17.0929 5.69009C17.2199 5.73709 17.3499 5.77659 17.4819 5.81109C17.5599 5.83109 17.6389 5.84759 17.7179 5.86359C17.7749 5.87509 17.8329 5.88459 17.8899 5.89409C17.9949 5.91159 18.0489 5.97209 18.0279 6.07709C18.0059 6.19009 17.9589 6.29509 17.9019 6.39409C17.7579 6.6406 17.5799 6.8636 17.3779 7.06511C17.1959 7.24611 16.9969 7.41011 16.7869 7.55912C16.6209 7.67812 16.4479 7.78662 16.2699 7.88713C16.1219 7.97113 15.9699 8.04813 15.8154 8.12013C15.7274 8.15913 15.6379 8.19563 15.5479 8.23113C15.4909 8.25413 15.4329 8.27513 15.3759 8.29813C15.3339 8.31463 15.2914 8.32963 15.2504 8.34713C15.1904 8.37313 15.1574 8.42113 15.1664 8.48363C15.1774 8.55863 15.2149 8.62813 15.2609 8.69063C15.4319 8.92864 15.6374 9.13364 15.8644 9.31365C16.0914 9.49365 16.3364 9.65115 16.5944 9.78316C16.7594 9.86616 16.9289 9.93816 17.1019 10.0012C17.2299 10.0472 17.3599 10.0867 17.4929 10.1207C17.5709 10.1407 17.6499 10.1572 17.7289 10.1727C17.7859 10.1842 17.8439 10.1937 17.9009 10.2032C18.0069 10.2207 18.0609 10.2822 18.0389 10.3872C18.0169 10.4992 17.9704 10.6042 17.9134 10.7027C17.7684 10.9492 17.5894 11.1712 17.3864 11.3722C17.0649 11.6947 16.7104 11.9787 16.3289 12.2277C15.8944 12.5102 15.4369 12.7527 14.9619 12.9587C14.7509 13.0512 14.5369 13.1367 14.3204 13.2162C14.2364 13.2462 14.1509 13.2732 14.0659 13.2997C13.9999 13.3207 13.9334 13.3402 13.8669 13.3597C13.8149 13.3747 13.7624 13.3882 13.7114 13.4047C13.6434 13.4267 13.6009 13.4802 13.6139 13.5497C13.6289 13.6327 13.6734 13.7062 13.7294 13.7692C13.9289 13.9892 14.1654 14.1732 14.4279 14.3242C14.6904 14.4752 14.9759 14.5852 15.2749 14.6592C15.4519 14.7002 15.6324 14.7267 15.8144 14.7442C15.9344 14.7557 16.0549 14.7612 16.1754 14.7637C16.2444 14.7652 16.3134 14.7647 16.3824 14.7637C16.4944 14.7622 16.5594 14.8182 16.5599 14.9302C16.5604 15.0472 16.5269 15.1622 16.4729 15.2682C16.3489 15.5127 16.1759 15.7272 15.9729 15.9152C15.5904 16.2717 15.1419 16.5462 14.6494 16.7462C14.0984 16.9712 13.5224 17.1107 12.9299 17.1597C12.6199 17.1852 12.3084 17.1822 11.9984 17.1537C11.8634 17.1412 11.7299 17.1227 11.5979 17.0987C11.5149 17.0837 11.4324 17.0657 11.3514 17.0447C11.2964 17.0307 11.2429 17.0137 11.1909 16.9957C11.0949 16.9627 11.0479 16.9022 11.0699 16.8012C11.0919 16.6972 11.1424 16.6052 11.2064 16.5237C11.3814 16.3072 11.5874 16.1172 11.8144 15.9502C12.0344 15.7882 12.2714 15.6467 12.5194 15.5207C12.7414 15.4082 12.9704 15.3092 13.2039 15.2207C13.3689 15.1587 13.5369 15.1042 13.7069 15.0542C13.7999 15.0267 13.8939 15.0012 13.9879 14.9757C14.0499 14.9582 14.1124 14.9422 14.1744 14.9247C14.2594 14.9007 14.3024 14.8457 14.2874 14.7612C14.2724 14.6732 14.2234 14.5947 14.1599 14.5297C13.9854 14.3472 13.7839 14.1907 13.5624 14.0572C13.1659 13.8182 12.7444 13.6322 12.3034 13.4837C12.0934 13.4152 11.8804 13.3552 11.6654 13.3012C11.5514 13.2712 11.4364 13.2447 11.3214 13.2192C11.2434 13.2012 11.1649 13.1852 11.0869 13.1682C11.0309 13.1557 10.9749 13.1437 10.9189 13.1312C10.8349 13.1127 10.7899 13.0672 10.7969 12.9832C10.8039 12.8952 10.8439 12.8127 10.8994 12.7407C11.0444 12.5637 11.2154 12.4097 11.4049 12.2737C11.5949 12.1382 11.7989 12.0192 12.0119 11.9142C12.1959 11.8242 12.3859 11.7442 12.5789 11.6702C12.7179 11.6177 12.8594 11.5717 13.0024 11.5292C13.0974 11.5007 13.1934 11.4757 13.2894 11.4507C13.3514 11.4337 13.4139 11.4187 13.4759 11.4012C13.5609 11.3772 13.6039 11.3217 13.5884 11.2377Z"/></svg>
       DeepSeek Harness Desktop
       <span class="tag" data-i18n="nav.tag">为 DSH 打造的桌面端</span>
     </a>
@@ -187,7 +351,6 @@
       <a href="#download" data-i18n="nav.download">下载</a>
       <a href="#how" data-i18n="nav.how">原理</a>
       <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener">Releases</a>
       <button class="lang-switch" id="langSwitch" type="button" aria-label="Switch language / 切换语言">English</button>
     </div>
   </div>
@@ -196,7 +359,7 @@
 <!-- Hero -->
 <header class="hero">
   <div class="container">
-    <svg class="whale" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23.16 17.04" fill="#4d6bfe" aria-hidden="true"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z"/></svg>
+    <svg class="whale" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23.16 17.04" fill="#4d6bfe" aria-hidden="true"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.4688 12.5075 7.80482 12.701C8.21534 12.939 8.68486 13.1145 9.13937 13.2935C9.99889 13.626 10.8699 13.891 11.7719 14.0845C12.1529 14.168 12.5409 14.2255 12.9319 14.2475C13.2159 14.2655 13.4969 14.2475 13.7679 14.1485C14.0034 14.0645 14.1689 13.885 14.2349 13.639C14.3019 13.3895 14.2639 13.15 14.1619 12.922C13.9989 12.5675 13.7609 12.2735 13.4619 12.0315C13.2104 11.826 12.9399 11.646 12.6579 11.488C11.4249 10.82 10.1139 10.3145 8.74386 9.94447C8.06085 9.75646 7.37484 9.59546 6.68283 9.45846C5.77481 9.28195 4.8698 9.24095 3.95429 9.18345C3.17928 9.13495 2.41127 9.07945 1.67376 8.84694C1.48526 8.78894 1.30176 8.71594 1.12476 8.63144C1.05626 8.59744 0.979761 8.57844 0.907261 8.55394C0.841261 8.53044 0.748261 8.49644 0.731261 8.42344C0.706261 8.32244 0.813261 8.28944 0.875261 8.26494C1.03826 8.19944 1.20526 8.14494 1.37276 8.09744C1.63176 8.02444 1.89176 7.95744 2.15827 7.91094C2.77728 7.79994 3.39328 7.71294 4.02629 7.70144C5.21481 7.67844 6.33782 8.03544 7.44384 8.48595C8.31285 8.84595 9.14887 9.27096 9.94588 9.76697C10.4869 10.096 11.0099 10.4535 11.5109 10.84C11.6469 10.944 11.7699 11.063 11.9049 11.1665C12.0199 11.2535 12.1429 11.329 12.2459 11.4325C12.3489 11.5335 12.3379 11.607 12.2464 11.692C12.0059 11.9185 11.7509 12.1305 11.4959 12.3385C11.2439 12.544 10.9849 12.741 10.7169 12.922C10.5019 13.066 10.2789 13.1965 10.0479 13.3095C9.73438 13.4645 9.41137 13.5895 9.07136 13.6605C8.71936 13.735 8.36635 13.777 8.00834 13.7665C6.93682 13.7345 5.93231 13.401 5.04479 12.844C4.31278 12.39 3.67777 11.807 3.21026 11.0555C2.64125 10.1525 2.35475 9.16496 2.34175 8.11144C2.33375 7.47894 2.43025 6.86144 2.62625 6.26543C2.82225 5.67243 3.10175 5.12442 3.45576 4.63142C3.71176 4.27392 4.00277 3.94692 4.32777 3.65642C4.54677 3.45592 4.77878 3.27042 5.02428 3.10292C5.10128 3.04942 5.18128 3.00242 5.26278 2.95742C5.32278 2.92392 5.39128 2.89742 5.45428 2.86292C5.58128 2.79192 5.58028 2.72392 5.45928 2.64742C5.16777 2.46242 4.87477 2.28142 4.57276 2.11642C4.17576 1.90192 3.76175 1.72092 3.33324 1.57242C3.14974 1.50942 2.96224 1.45642 2.77374 1.40542C2.70124 1.38642 2.62624 1.37242 2.55224 1.35542C2.48824 1.34142 2.42124 1.32992 2.35924 1.30942C2.20624 1.26042 2.16324 1.14292 2.24674 1.01042C2.33424 0.872418 2.45274 0.762915 2.57874 0.661413C2.91175 0.389906 3.28175 0.177903 3.68726 0.0278957C3.85926 -0.0326062 4.03776 0.0113955 4.21077 0.0568968C4.78427 0.210904 5.31978 0.466915 5.82778 0.769424C6.53079 1.17843 7.1768 1.66944 7.78431 2.20545C7.94581 2.35146 8.10481 2.50046 8.26231 2.65096C8.46331 2.84097 8.67232 3.02297 8.88432 3.20198C9.36783 3.61899 9.86784 4.015 10.3858 4.38402C10.9244 4.76703 11.4799 5.12504 12.0514 5.45606C12.3549 5.63856 12.6629 5.81407 12.9739 5.98207C13.3139 6.16408 13.6569 6.33958 14.0034 6.50659C14.2114 6.60459 14.4214 6.69609 14.6329 6.7851C14.7549 6.8361 14.8779 6.8836 15.0019 6.9281C15.0919 6.9596 15.1829 6.9896 15.2739 7.0181C15.3389 7.0376 15.4059 7.0551 15.4709 7.0736C15.5599 7.0996 15.6299 7.0706 15.6679 6.9901C15.6959 6.9296 15.7019 6.8636 15.7069 6.7976C15.7169 6.6756 15.7099 6.5536 15.6969 6.4326C15.6689 6.18359 15.6149 5.93959 15.5359 5.70108C15.3829 5.23357 15.1659 4.79556 14.8969 4.38655C14.6829 4.06254 14.4349 3.76504 14.1644 3.49054C13.9944 3.31404 13.8124 3.14903 13.6239 2.99203C13.5499 2.93003 13.4749 2.86953 13.4009 2.80853C13.3549 2.77003 13.3079 2.73253 13.2629 2.69353C13.2299 2.66453 13.1959 2.63653 13.1649 2.60553C13.0669 2.50903 13.0819 2.42003 13.1839 2.35703C13.3089 2.28003 13.4409 2.21603 13.5769 2.16103C13.9599 2.01003 14.3559 1.89903 14.7609 1.82203C15.2169 1.73553 15.6759 1.67903 16.1389 1.65803C16.4549 1.64403 16.7709 1.66203 17.0849 1.70803C17.1989 1.72553 17.3129 1.74653 17.4259 1.77203C17.4899 1.78653 17.5539 1.80253 17.6169 1.82053C17.6679 1.83453 17.7189 1.85003 17.7679 1.86903C17.8629 1.90603 17.8939 1.97253 17.8599 2.06453C17.8239 2.16253 17.7719 2.25253 17.7119 2.33553C17.5299 2.57854 17.3209 2.79904 17.0899 2.99505C16.8949 3.15905 16.6859 3.30755 16.4689 3.44506C16.2709 3.57106 16.0669 3.68656 15.8574 3.79307C15.7624 3.83807 15.6654 3.87907 15.5684 3.92007C15.5094 3.94407 15.4494 3.96657 15.3894 3.98957C15.3474 4.00507 15.3049 4.01957 15.2639 4.03707C15.2059 4.06207 15.1739 4.10807 15.1819 4.16907C15.1929 4.24507 15.2299 4.31407 15.2749 4.37657C15.4439 4.61258 15.6469 4.81708 15.8714 4.99808C16.0959 5.17908 16.3384 5.33658 16.5944 5.47059C16.7564 5.55259 16.9229 5.62559 17.0929 5.69009C17.2199 5.73709 17.3499 5.77659 17.4819 5.81109C17.5599 5.83109 17.6389 5.84759 17.7179 5.86359C17.7749 5.87509 17.8329 5.88459 17.8899 5.89409C17.9949 5.91159 18.0489 5.97209 18.0279 6.07709C18.0059 6.19009 17.9589 6.29509 17.9019 6.39409C17.7579 6.6406 17.5799 6.8636 17.3779 7.06511C17.1959 7.24611 16.9969 7.41011 16.7869 7.55912C16.6209 7.67812 16.4479 7.78662 16.2699 7.88713C16.1219 7.97113 15.9699 8.04813 15.8154 8.12013C15.7274 8.15913 15.6379 8.19563 15.5479 8.23113C15.4909 8.25413 15.4329 8.27513 15.3759 8.29813C15.3339 8.31463 15.2914 8.32963 15.2504 8.34713C15.1904 8.37313 15.1574 8.42113 15.1664 8.48363C15.1774 8.55863 15.2149 8.62813 15.2609 8.69063C15.4319 8.92864 15.6374 9.13364 15.8644 9.31365C16.0914 9.49365 16.3364 9.65115 16.5944 9.78316C16.7594 9.86616 16.9289 9.93816 17.1019 10.0012C17.2299 10.0472 17.3599 10.0867 17.4929 10.1207C17.5709 10.1407 17.6499 10.1572 17.7289 10.1727C17.7859 10.1842 17.8439 10.1937 17.9009 10.2032C18.0069 10.2207 18.0609 10.2822 18.0389 10.3872C18.0169 10.4992 17.9704 10.6042 17.9134 10.7027C17.7684 10.9492 17.5894 11.1712 17.3864 11.3722C17.0649 11.6947 16.7104 11.9787 16.3289 12.2277C15.8944 12.5102 15.4369 12.7527 14.9619 12.9587C14.7509 13.0512 14.5369 13.1367 14.3204 13.2162C14.2364 13.2462 14.1509 13.2732 14.0659 13.2997C13.9999 13.3207 13.9334 13.3402 13.8669 13.3597C13.8149 13.3747 13.7624 13.3882 13.7114 13.4047C13.6434 13.4267 13.6009 13.4802 13.6139 13.5497C13.6289 13.6327 13.6734 13.7062 13.7294 13.7692C13.9289 13.9892 14.1654 14.1732 14.4279 14.3242C14.6904 14.4752 14.9759 14.5852 15.2749 14.6592C15.4519 14.7002 15.6324 14.7267 15.8144 14.7442C15.9344 14.7557 16.0549 14.7612 16.1754 14.7637C16.2444 14.7652 16.3134 14.7647 16.3824 14.7637C16.4944 14.7622 16.5594 14.8182 16.5599 14.9302C16.5604 15.0472 16.5269 15.1622 16.4729 15.2682C16.3489 15.5127 16.1759 15.7272 15.9729 15.9152C15.5904 16.2717 15.1419 16.5462 14.6494 16.7462C14.0984 16.9712 13.5224 17.1107 12.9299 17.1597C12.6199 17.1852 12.3084 17.1822 11.9984 17.1537C11.8634 17.1412 11.7299 17.1227 11.5979 17.0987C11.5149 17.0837 11.4324 17.0657 11.3514 17.0447C11.2964 17.0307 11.2429 17.0137 11.1909 16.9957C11.0949 16.9627 11.0479 16.9022 11.0699 16.8012C11.0919 16.6972 11.1424 16.6052 11.2064 16.5237C11.3814 16.3072 11.5874 16.1172 11.8144 15.9502C12.0344 15.7882 12.2714 15.6467 12.5194 15.5207C12.7414 15.4082 12.9704 15.3092 13.2039 15.2207C13.3689 15.1587 13.5369 15.1042 13.7069 15.0542C13.7999 15.0267 13.8939 15.0012 13.9879 14.9757C14.0499 14.9582 14.1124 14.9422 14.1744 14.9247C14.2594 14.9007 14.3024 14.8457 14.2874 14.7612C14.2724 14.6732 14.2234 14.5947 14.1599 14.5297C13.9854 14.3472 13.7839 14.1907 13.5624 14.0572C13.1659 13.8182 12.7444 13.6322 12.3034 13.4837C12.0934 13.4152 11.8804 13.3552 11.6654 13.3012C11.5514 13.2712 11.4364 13.2447 11.3214 13.2192C11.2434 13.2012 11.1649 13.1852 11.0869 13.1682C11.0309 13.1557 10.9749 13.1437 10.9189 13.1312C10.8349 13.1127 10.7899 13.0672 10.7969 12.9832C10.8039 12.8952 10.8439 12.8127 10.8994 12.7407C11.0444 12.5637 11.2154 12.4097 11.4049 12.2737C11.5949 12.1382 11.7989 12.0192 12.0119 11.9142C12.1959 11.8242 12.3859 11.7442 12.5789 11.6702C12.7179 11.6177 12.8594 11.5717 13.0024 11.5292C13.0974 11.5007 13.1934 11.4757 13.2894 11.4507C13.3514 11.4337 13.4139 11.4187 13.4759 11.4012C13.5609 11.3772 13.6039 11.3217 13.5884 11.2377Z"/></svg>
     <h1>DeepSeek Harness <span class="accent">Desktop</span></h1>
     <p class="sub" data-i18n="hero.sub">为 <b>DeepSeek Harness（DSH）</b> 打造的桌面端体验 —— 完整的智能体、模型、工具、会话与 Web UI，配上真正的桌面应用质感。</p>
     <div class="badges">
@@ -207,10 +370,48 @@
       <span class="badge">MIT License</span>
     </div>
     <div class="cta">
-      <a class="btn btn-primary" href="#download" data-i18n="hero.cta1">立即下载</a>
-      <a class="btn btn-ghost" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop" target="_blank" rel="noopener" data-i18n="hero.cta2">在 GitHub 上查看 →</a>
+      <a class="btn btn-primary" href="#download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span data-i18n="hero.cta1">立即下载</span>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 2.87-.39c.97 0 1.95.13 2.87.39 2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.73.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .3.2.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+        <span data-i18n="hero.cta2">在 GitHub 上查看</span>
+      </a>
     </div>
-    <p class="hint" data-i18n="hero.hint">当前版本 v1.4.3 · 自动安装并保持 DSH 核心最新</p>
+    <p class="hint" data-i18n="hero.hint">当前版本 v1.5.0 · 自动安装并保持 DSH 核心最新</p>
+  </div>
+
+  <!-- pure-CSS frameless window mockup -->
+  <div class="container mock-wrap">
+    <div class="mock" aria-hidden="true">
+      <div class="mock-controls">
+        <span class="min"><i></i></span>
+        <span class="max"><i></i></span>
+        <span class="cls"><i></i></span>
+      </div>
+      <div class="mock-body">
+        <div class="mock-side">
+          <div class="ms-brand">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23.16 17.04" fill="#4d6bfe"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018Z"/></svg>
+            <div class="bar"></div>
+          </div>
+          <div class="item active"><i style="width:70%"></i></div>
+          <div class="item"><i style="width:52%"></i></div>
+          <div class="item"><i style="width:64%"></i></div>
+          <div class="item"><i style="width:44%"></i></div>
+          <div class="item"><i style="width:58%"></i></div>
+        </div>
+        <div class="mock-main">
+          <div class="mock-head"><div class="bar" style="width:120px"></div><div class="bar" style="width:56px"></div></div>
+          <div class="mock-msg"><div class="avatar a"></div><div class="lines"><i class="w60"></i><i class="w85"></i></div></div>
+          <div class="mock-msg"><div class="avatar b"></div><div class="lines"><i class="w85"></i><i class="w40"></i><i class="w70"></i></div></div>
+          <div class="mock-msg"><div class="avatar a"></div><div class="lines"><i class="w70"></i></div></div>
+          <div class="mock-input"><i></i><span class="send"></span></div>
+        </div>
+      </div>
+    </div>
+    <p class="mock-caption" data-i18n="hero.mockCaption">无边框窗口 + 右上角悬浮控制条：DSH 的内容一寸不少，窗口管理一个不缺。</p>
   </div>
 </header>
 
@@ -219,17 +420,17 @@
   <div class="container">
     <div class="keypoints">
       <div class="kp">
-        <div class="icon ic-blue">📦</div>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></div>
         <h3 data-i18n="kp1.title">DSH 核心不打进安装包</h3>
         <p data-i18n="kp1.desc">目标机器首次启动自动安装最新版 DSH，之后直接复用本机已有完整安装——轻量、随时更新。</p>
       </div>
       <div class="kp">
-        <div class="icon ic-green">⚡</div>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
         <h3 data-i18n="kp2.title">零依赖运行</h3>
-        <p data-i18n="kp2.desc">DSH 核心跑在 Electron 内嵌 Node 与内置 pnpm 上，最终用户无需安装 node / npm。</p>
+        <p data-i18n="kp2.desc">内置独立 Node 运行时与 pnpm 安装器，最终用户无需安装 node / npm 等任何开发环境。</p>
       </div>
       <div class="kp">
-        <div class="icon ic-amber">🖥️</div>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
         <h3 data-i18n="kp3.title">三平台安装包</h3>
         <p data-i18n="kp3.desc">Windows NSIS · macOS dmg（x64 / arm64）· Linux AppImage / deb / rpm，一键安装。</p>
       </div>
@@ -241,29 +442,59 @@
 <section id="features">
   <div class="container">
     <div class="section-title">
+      <span class="eyebrow" data-i18n="features.eyebrow">FEATURES</span>
       <h2 data-i18n="features.title">主要功能</h2>
       <p data-i18n="features.sub">把 DSH 装进一个原生桌面应用，保留完整能力，补上桌面该有的体验。</p>
     </div>
     <div class="features">
       <div class="feature">
-        <h3><span class="dot"></span><span data-i18n="f1.title">沉浸式桌面窗口</span></h3>
-        <p data-i18n="f1.desc">无边框（frameless）窗口，DSH Web UI 占满整个屏幕；最小化 / 最大化 / 关闭按钮以半透明方式融入界面右上角，不遮挡任何 DSH 内容。</p>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18"/><circle cx="18.2" cy="6" r="0.4" fill="currentColor"/><circle cx="15.8" cy="6" r="0.4" fill="currentColor"/></svg></div>
+        <div>
+          <h3 data-i18n="f1.title">沉浸式桌面窗口</h3>
+          <p data-i18n="f1.desc">无边框（frameless）窗口，DSH Web UI 占满整个屏幕；最小化 / 最大化 / 关闭按钮融入右上角悬浮控制条，不遮挡任何 DSH 内容；插件失效时自动降级为内置备用控制条，窗口永远可关。</p>
+        </div>
       </div>
       <div class="feature">
-        <h3><span class="dot"></span><span data-i18n="f2.title">系统托盘</span></h3>
-        <p data-i18n="f2.desc">DeepSeek 鲸鱼托盘图标，右键「打开 / 退出」。开启「常驻通知栏」后，关闭窗口最小化到托盘，后台持续运行。</p>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1.5 9a2 2 0 0 1-2 1.7h-7a2 2 0 0 1-2-1.7L5 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/></svg></div>
+        <div>
+          <h3 data-i18n="f2.title">系统托盘</h3>
+          <p data-i18n="f2.desc">DeepSeek 鲸鱼托盘图标，右键「打开 / 退出」。开启「常驻通知栏」后，关闭窗口最小化到托盘，后台持续运行。</p>
+        </div>
       </div>
       <div class="feature">
-        <h3><span class="dot"></span><span data-i18n="f3.title">保持最新</span></h3>
-        <p data-i18n="f3.desc">内置「核心」设置页显示 DSH 版本、一键检查更新，支持自动更新（新版本自动下载并提示重启）。</p>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 8 16 8"/></svg></div>
+        <div>
+          <h3 data-i18n="f3.title">保持最新</h3>
+          <p data-i18n="f3.desc">内置「核心」设置页显示 DSH 版本、一键检查更新，支持自动更新；更新先停核心再安装再重启，全程带进度条，安全无崩溃。</p>
+        </div>
       </div>
       <div class="feature">
-        <h3><span class="dot"></span><span data-i18n="f4.title">任务通知</span></h3>
-        <p data-i18n="f4.desc">主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）；可选「阻止休眠」，任务运行期间防止系统睡眠。</p>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></div>
+        <div>
+          <h3 data-i18n="f4.title">任务通知</h3>
+          <p data-i18n="f4.desc">主任务完成、失败或需要确认时发送桌面通知——严格限定主会话，子任务（subagent）不打扰；窗口聚焦时不弹；可选「阻止休眠」，任务运行期间防止系统睡眠。</p>
+        </div>
       </div>
-      <div class="feature wide">
-        <h3><span class="dot"></span><span data-i18n="f5.title">继承终端 Profile</span></h3>
-        <p data-i18n="f5.desc">自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，此开关默认开启。</p>
+      <div class="feature">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-6"/><path d="M10 4H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h6"/><path d="M12 2v2"/><path d="M12 20v2"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <div>
+          <h3 data-i18n="f6.title">内置插件市场</h3>
+          <p data-i18n="f6.desc">开箱即用的插件市场（dshmarket），目标机器零下载：浏览、安装、管理 DSH 插件全在应用内完成；壳自动接管插件重启语义，杜绝野核心残留。</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div>
+        <div>
+          <h3><span data-i18n="f7.title">插件故障自愈</span><span class="pill">v1.5.0</span></h3>
+          <p data-i18n="f7.desc">插件加载失败导致核心无法启动时，壳自动识别出问题的第三方插件（系统插件排查在外）、自动卸载并重启，恢复后面板明确告知卸载了哪个插件——DSH 被玩坏也能自己站起来。</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+        <div>
+          <h3 data-i18n="f5.title">继承终端 Profile</h3>
+          <p data-i18n="f5.desc">自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，此开关默认开启。</p>
+        </div>
       </div>
     </div>
   </div>
@@ -273,33 +504,62 @@
 <section class="download" id="download">
   <div class="container">
     <div class="section-title">
+      <span class="eyebrow" data-i18n="dl.eyebrow">DOWNLOAD</span>
       <h2 data-i18n="dl.title">下载安装</h2>
       <p data-i18n="dl.sub">从 GitHub Releases 获取对应平台安装包。首次启动会自动安装最新版 DSH（约 250MB，通常几十秒）。</p>
     </div>
     <div class="platforms">
       <div class="platform">
-        <div class="os"><span class="emoji">🪟</span> Windows</div>
+        <div class="os">
+          <svg viewBox="0 0 24 24" fill="#7aa0ff"><rect x="2.5" y="3.5" width="8.8" height="8.3" rx="1"/><rect x="12.7" y="3.5" width="8.8" height="8.3" rx="1"/><rect x="2.5" y="13.2" width="8.8" height="8.3" rx="1"/><rect x="12.7" y="13.2" width="8.8" height="8.3" rx="1"/></svg>
+          Windows
+        </div>
         <div class="formats" data-i18n="dl.win.formats">NSIS 安装器（x64）· 支持自定义安装目录</div>
         <div class="links">
-          <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="dl.win.btn">下载 Windows 安装器</a>
+          <a class="primary" data-asset="exe" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-i18n="dl.win.btn">下载 Windows 安装器</span></a>
         </div>
       </div>
       <div class="platform">
-        <div class="os"><span class="emoji">🍎</span> macOS</div>
+        <div class="os">
+          <svg viewBox="0 0 24 24" fill="#a7b1c8"><path d="M17.05 12.54c-.03-2.9 2.37-4.29 2.48-4.36-1.35-1.98-3.46-2.25-4.21-2.28-1.79-.18-3.5 1.06-4.4 1.06-.91 0-2.31-1.03-3.8-1.01-1.95.03-3.75 1.14-4.76 2.88-2.03 3.52-.52 8.74 1.46 11.6.97 1.4 2.12 2.97 3.63 2.91 1.46-.06 2.01-.94 3.77-.94s2.26.94 3.8.91c1.57-.03 2.57-1.42 3.53-2.83 1.11-1.62 1.57-3.19 1.6-3.27-.04-.02-3.07-1.18-3.1-4.67zM14.16 4.06c.8-.97 1.34-2.32 1.19-3.66-1.15.05-2.55.77-3.38 1.74-.74.86-1.39 2.23-1.22 3.55 1.29.1 2.6-.65 3.41-1.63z"/></svg>
+          macOS
+        </div>
         <div class="formats" data-i18n="dl.mac.formats">dmg · Apple Silicon（arm64）/ Intel（x64）</div>
         <div class="links">
-          <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="dl.mac.btn1">下载 arm64（Apple Silicon）</a>
-          <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="dl.mac.btn2">下载 x64（Intel）</a>
+          <a class="primary" data-asset="dmg-arm64" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-i18n="dl.mac.btn1">下载 arm64（Apple Silicon）</span></a>
+          <a data-asset="dmg-x64" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-i18n="dl.mac.btn2">下载 x64（Intel）</span></a>
         </div>
       </div>
       <div class="platform">
-        <div class="os"><span class="emoji">🐧</span> Linux</div>
+        <div class="os">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#a7b1c8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Linux
+        </div>
         <div class="formats" data-i18n="dl.linux.formats">AppImage · deb · rpm（均 x64）</div>
         <div class="links">
-          <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="dl.linux.btn1">下载 AppImage</a>
-          <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="dl.linux.btn2">下载 deb</a>
-          <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="dl.linux.btn3">下载 rpm</a>
+          <a class="primary" data-asset="appimage" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-i18n="dl.linux.btn1">下载 AppImage</span></a>
+          <a data-asset="deb" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-i18n="dl.linux.btn2">下载 deb</span></a>
+          <a data-asset="rpm" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-i18n="dl.linux.btn3">下载 rpm</span></a>
         </div>
+      </div>
+    </div>
+    <div class="release-card" id="releaseCard">
+      <div class="rel-head">
+        <div class="rel-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m19.07 4.93-2.83 2.83"/><path d="M22 12h-4"/><path d="m19.07 19.07-2.83-2.83"/><path d="M12 22v-4"/><path d="m4.93 19.07 2.83-2.83"/><path d="M2 12h4"/><path d="m4.93 4.93 2.83 2.83"/></svg>
+          <span data-i18n="rel.title">最新版本</span>
+          <span class="rel-tag" id="relTag">v1.5.0</span>
+          <span class="rel-date" id="relDate"></span>
+        </div>
+        <a class="rel-all" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="rel.all">查看全部版本</a>
+      </div>
+      <div class="rel-body" id="relBody" data-i18n="rel.fallback">
+        <h4>v1.5.0 亮点</h4>
+        <ul>
+          <li><strong>插件故障自动恢复</strong>：插件导致的启动失败自动识别罪魁、卸载并重启，恢复后面板明确告知。</li>
+          <li><strong>任务通知限定主会话</strong>：子任务（subagent）的完成/失败/审批不再弹原生通知。</li>
+          <li><strong>重启稳定性</strong>：修复 Ctrl+Alt+R 偶发「端口已被占用」的残留竞态。</li>
+        </ul>
       </div>
     </div>
     <p class="dl-note" data-i18n="dl.note">所有安装包都在 GitHub Releases（由 GitHub Actions 跨平台自动构建发布），进入后按平台选择对应文件即可。</p>
@@ -310,6 +570,7 @@
 <section id="how">
   <div class="container">
     <div class="section-title">
+      <span class="eyebrow" data-i18n="how.eyebrow">HOW IT WORKS</span>
       <h2 data-i18n="how.title">工作原理</h2>
       <p data-i18n="how.sub">启动一次，你拥有的是一套会自动保持最新的完整 DSH。</p>
     </div>
@@ -317,12 +578,13 @@
       <div class="how-item"><span class="n">1</span><p data-i18n="how.s1"><b>定位 DSH</b>：应用托管目录 → node_modules → npm <code>_npx</code> 缓存（取最新完整安装）。</p></div>
       <div class="how-item"><span class="n">2</span><p data-i18n="how.s2"><b>自动安装</b>：没有则用内置 pnpm 安装 <code>@deepseek-ai/dsh@latest</code>（registry 探测 + 失败重试/换镜像 + 实时进度条与已下载大小）。</p></div>
       <div class="how-item"><span class="n">3</span><p data-i18n="how.s3"><b>端口预检</b>：被占用则弹出「换端口并重试」面板（端口持久化记忆）。</p></div>
-      <div class="how-item"><span class="n">4</span><p data-i18n="how.s4"><b>嵌入启动</b>：DSH 核心以内置 Node 运行（无弹窗、零依赖），桌面插件嵌入窗口控制条 / 设置页 / 更新徽章，URL 加载进 frameless 窗口。</p></div>
-      <div class="how-item"><span class="n">5</span><p data-i18n="how.s5"><b>持续守护</b>：失败回到启动页（可复制错误）；退出时清理整棵进程树；崩溃一键重启；更新先停核心再安装再重启，安全无崩溃。</p></div>
+      <div class="how-item"><span class="n">4</span><p data-i18n="how.s4"><b>嵌入启动</b>：DSH 核心以内置独立 Node 运行（Windows 无弹窗、零依赖），桌面插件嵌入窗口控制条 / 设置页 / 更新徽章，URL 加载进 frameless 窗口。</p></div>
+      <div class="how-item"><span class="n">5</span><p data-i18n="how.s5"><b>持续守护</b>：失败回到启动页（可复制错误）；退出时清理整棵进程树；崩溃一键重启；插件导致的启动失败自动卸载罪魁并自愈；更新先停核心再安装再重启，安全无崩溃。</p></div>
     </div>
 
-    <div class="section-title" style="margin-top:56px">
-      <h2 style="font-size:22px" data-i18n="env.title">可选环境变量</h2>
+    <div class="section-title" style="margin-top:60px">
+      <span class="eyebrow" data-i18n="env.eyebrow">ADVANCED</span>
+      <h2 style="font-size:24px" data-i18n="env.title">可选环境变量</h2>
     </div>
     <table class="env">
       <thead>
@@ -342,6 +604,9 @@
 <!-- Footer -->
 <footer>
   <div class="container footer-inner">
+    <div class="footer-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23.16 17.04" fill="#4d6bfe" aria-hidden="true"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018Z"/></svg>
+    </div>
     <div class="footer-links">
       <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop" target="_blank" rel="noopener" data-i18n="foot.repo">GitHub 仓库</a>
       <a href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener">Releases</a>
@@ -370,26 +635,33 @@
       'hero.badge2': 'DSH 核心不打进安装包',
       'hero.badge3': '零依赖运行',
       'hero.cta1': '立即下载',
-      'hero.cta2': '在 GitHub 上查看 →',
-      'hero.hint': '当前版本 v1.4.3 · 自动安装并保持 DSH 核心最新',
+      'hero.cta2': '在 GitHub 上查看',
+      'hero.hint': '当前版本 {ver} · 自动安装并保持 DSH 核心最新',
+      'hero.mockCaption': '无边框窗口 + 右上角悬浮控制条：DSH 的内容一寸不少，窗口管理一个不缺。',
       'kp1.title': 'DSH 核心不打进安装包',
       'kp1.desc': '目标机器首次启动自动安装最新版 DSH，之后直接复用本机已有完整安装——轻量、随时更新。',
       'kp2.title': '零依赖运行',
-      'kp2.desc': 'DSH 核心跑在 Electron 内嵌 Node 与内置 pnpm 上，最终用户无需安装 node / npm。',
+      'kp2.desc': '内置独立 Node 运行时与 pnpm 安装器，最终用户无需安装 node / npm 等任何开发环境。',
       'kp3.title': '三平台安装包',
       'kp3.desc': 'Windows NSIS · macOS dmg（x64 / arm64）· Linux AppImage / deb / rpm，一键安装。',
+      'features.eyebrow': 'FEATURES',
       'features.title': '主要功能',
       'features.sub': '把 DSH 装进一个原生桌面应用，保留完整能力，补上桌面该有的体验。',
       'f1.title': '沉浸式桌面窗口',
-      'f1.desc': '无边框（frameless）窗口，DSH Web UI 占满整个屏幕；最小化 / 最大化 / 关闭按钮以半透明方式融入界面右上角，不遮挡任何 DSH 内容。',
+      'f1.desc': '无边框（frameless）窗口，DSH Web UI 占满整个屏幕；最小化 / 最大化 / 关闭按钮融入右上角悬浮控制条，不遮挡任何 DSH 内容；插件失效时自动降级为内置备用控制条，窗口永远可关。',
       'f2.title': '系统托盘',
       'f2.desc': 'DeepSeek 鲸鱼托盘图标，右键「打开 / 退出」。开启「常驻通知栏」后，关闭窗口最小化到托盘，后台持续运行。',
       'f3.title': '保持最新',
-      'f3.desc': '内置「核心」设置页显示 DSH 版本、一键检查更新，支持自动更新（新版本自动下载并提示重启）。',
+      'f3.desc': '内置「核心」设置页显示 DSH 版本、一键检查更新，支持自动更新；更新先停核心再安装再重启，全程带进度条，安全无崩溃。',
       'f4.title': '任务通知',
-      'f4.desc': '主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）；可选「阻止休眠」，任务运行期间防止系统睡眠。',
+      'f4.desc': '主任务完成、失败或需要确认时发送桌面通知——严格限定主会话，子任务（subagent）不打扰；窗口聚焦时不弹；可选「阻止休眠」，任务运行期间防止系统睡眠。',
+      'f6.title': '内置插件市场',
+      'f6.desc': '开箱即用的插件市场（dshmarket），目标机器零下载：浏览、安装、管理 DSH 插件全在应用内完成；壳自动接管插件重启语义，杜绝野核心残留。',
+      'f7.title': '插件故障自愈',
+      'f7.desc': '插件加载失败导致核心无法启动时，壳自动识别出问题的第三方插件（系统插件排查在外）、自动卸载并重启，恢复后面板明确告知卸载了哪个插件——DSH 被玩坏也能自己站起来。',
       'f5.title': '继承终端 Profile',
       'f5.desc': '自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，此开关默认开启。',
+      'dl.eyebrow': 'DOWNLOAD',
       'dl.title': '下载安装',
       'dl.sub': '从 GitHub Releases 获取对应平台安装包。首次启动会自动安装最新版 DSH（约 250MB，通常几十秒）。',
       'dl.win.formats': 'NSIS 安装器（x64）· 支持自定义安装目录',
@@ -402,13 +674,19 @@
       'dl.linux.btn2': '下载 deb',
       'dl.linux.btn3': '下载 rpm',
       'dl.note': '所有安装包都在 GitHub Releases（由 GitHub Actions 跨平台自动构建发布），进入后按平台选择对应文件即可。',
+      'rel.title': '最新版本',
+      'rel.all': '查看全部版本',
+      'rel.published': '发布于 ',
+      'rel.fallback': '<h4>v1.5.0 亮点</h4><ul><li><strong>插件故障自动恢复</strong>：插件导致的启动失败自动识别罪魁、卸载并重启，恢复后面板明确告知。</li><li><strong>任务通知限定主会话</strong>：子任务（subagent）的完成/失败/审批不再弹原生通知。</li><li><strong>重启稳定性</strong>：修复 Ctrl+Alt+R 偶发「端口已被占用」的残留竞态。</li></ul>',
+      'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
       'how.s1': '<b>定位 DSH</b>：应用托管目录 → node_modules → npm <code>_npx</code> 缓存（取最新完整安装）。',
       'how.s2': '<b>自动安装</b>：没有则用内置 pnpm 安装 <code>@deepseek-ai/dsh@latest</code>（registry 探测 + 失败重试/换镜像 + 实时进度条与已下载大小）。',
       'how.s3': '<b>端口预检</b>：被占用则弹出「换端口并重试」面板（端口持久化记忆）。',
-      'how.s4': '<b>嵌入启动</b>：DSH 核心以内置 Node 运行（无弹窗、零依赖），桌面插件嵌入窗口控制条 / 设置页 / 更新徽章，URL 加载进 frameless 窗口。',
-      'how.s5': '<b>持续守护</b>：失败回到启动页（可复制错误）；退出时清理整棵进程树；崩溃一键重启；更新先停核心再安装再重启，安全无崩溃。',
+      'how.s4': '<b>嵌入启动</b>：DSH 核心以内置独立 Node 运行（Windows 无弹窗、零依赖），桌面插件嵌入窗口控制条 / 设置页 / 更新徽章，URL 加载进 frameless 窗口。',
+      'how.s5': '<b>持续守护</b>：失败回到启动页（可复制错误）；退出时清理整棵进程树；崩溃一键重启；插件导致的启动失败自动卸载罪魁并自愈；更新先停核心再安装再重启，安全无崩溃。',
+      'env.eyebrow': 'ADVANCED',
       'env.title': '可选环境变量',
       'env.col1': '变量',
       'env.col2': '作用',
@@ -433,26 +711,33 @@
       'hero.badge2': 'DSH core not bundled',
       'hero.badge3': 'Zero-dependency runtime',
       'hero.cta1': 'Download now',
-      'hero.cta2': 'View on GitHub →',
-      'hero.hint': 'Current version v1.4.3 · Auto-installs and keeps the DSH core up to date',
+      'hero.cta2': 'View on GitHub',
+      'hero.hint': 'Current version {ver} · Auto-installs and keeps the DSH core up to date',
+      'hero.mockCaption': 'A frameless window with a floating control strip: every pixel of DSH content intact, every window control in place.',
       'kp1.title': 'DSH core not bundled',
       'kp1.desc': 'On first launch it installs the latest DSH automatically, then reuses any existing full install — lightweight and always up to date.',
       'kp2.title': 'Zero-dependency runtime',
-      'kp2.desc': 'The DSH core runs on Electron\u2019s embedded Node and a bundled pnpm — end users don\u2019t need to install Node or npm.',
+      'kp2.desc': 'A bundled standalone Node runtime and pnpm installer — end users never need Node, npm, or any dev toolchain.',
       'kp3.title': 'Installers for 3 platforms',
       'kp3.desc': 'Windows NSIS · macOS dmg (x64 / arm64) · Linux AppImage / deb / rpm, one-click install.',
+      'features.eyebrow': 'FEATURES',
       'features.title': 'Key Features',
       'features.sub': 'Put DSH into a native desktop app — full capabilities, plus the desktop experience it deserves.',
       'f1.title': 'Immersive desktop window',
-      'f1.desc': 'A frameless window where the DSH web UI fills the screen; minimize / maximize / close buttons blend into the top-right corner without covering any DSH content.',
+      'f1.desc': 'A frameless window where the DSH web UI fills the screen; minimize / maximize / close live in a floating top-right strip that never covers DSH content; if the plugin fails, a built-in fallback strip takes over so the window can always be closed.',
       'f2.title': 'System tray',
       'f2.desc': 'A DeepSeek whale tray icon with right-click "Open / Quit". With "Stay in tray" enabled, closing the window minimizes it to the tray and keeps running in the background.',
       'f3.title': 'Always up to date',
-      'f3.desc': 'A built-in "Core" settings page shows the DSH version and checks for updates in one click, with automatic updates (downloads new versions and prompts to restart).',
+      'f3.desc': 'A built-in "Core" settings page shows the DSH version and checks for updates in one click, with automatic updates; updates stop the core, install, then restart — progress bar throughout, safe and crash-free.',
       'f4.title': 'Task notifications',
-      'f4.desc': 'Desktop notifications when the main task finishes, fails, or needs confirmation (subtask completions stay quiet); optional "Prevent sleep" keeps the system awake while tasks run.',
+      'f4.desc': 'Desktop notifications when the main task finishes, fails, or needs confirmation — strictly the main session only, subagents never nag; suppressed while the window is focused; optional "Prevent sleep" keeps the system awake while tasks run.',
+      'f6.title': 'Built-in plugin market',
+      'f6.desc': 'A ready-to-use plugin market (dshmarket) with zero download on the target machine: browse, install and manage DSH plugins entirely in-app; the shell owns restart semantics, so no rogue core is ever left behind.',
+      'f7.title': 'Plugin failure self-healing',
+      'f7.desc': 'When a broken plugin stops the core from booting, the shell identifies the offending third-party plugin (system plugins excluded), uninstalls it, restarts, and tells you exactly what was removed — DSH stands back up on its own.',
       'f5.title': 'Inherit terminal profile',
       'f5.desc': 'Auto-loads terminal environment variables (PATH etc.) into DSH so external processes like MCP servers can find executables; enabled by default since macOS apps launched from Finder lack them.',
+      'dl.eyebrow': 'DOWNLOAD',
       'dl.title': 'Download',
       'dl.sub': 'Get the installer for your platform from GitHub Releases. First launch auto-installs the latest DSH (~250 MB, usually within tens of seconds).',
       'dl.win.formats': 'NSIS installer (x64) · custom install directory supported',
@@ -465,13 +750,19 @@
       'dl.linux.btn2': 'Download deb',
       'dl.linux.btn3': 'Download rpm',
       'dl.note': 'All installers are on GitHub Releases (built and published automatically by GitHub Actions) — pick the file for your platform.',
+      'rel.title': 'Latest release',
+      'rel.all': 'All releases',
+      'rel.published': 'Released ',
+      'rel.fallback': '<h4>v1.5.0 highlights</h4><ul><li><strong>Plugin failure self-healing</strong>: when a broken plugin stops the core from booting, the culprit is identified, uninstalled and restarted automatically.</li><li><strong>Main-session-only notifications</strong>: subagent completion / failure / approval events no longer raise native notifications.</li><li><strong>Restart stability</strong>: fixed the leftover race behind the occasional "port already in use" on Ctrl+Alt+R.</li></ul>',
+      'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
       'how.s1': '<b>Locate DSH</b>: app-managed directory → node_modules → npm <code>_npx</code> cache (newest full install).',
       'how.s2': '<b>Auto-install</b>: otherwise install <code>@deepseek-ai/dsh@latest</code> with the bundled pnpm (registry probing + retry / mirror fallback + live progress bar and download size).',
       'how.s3': '<b>Port pre-check</b>: if occupied, a "change port and retry" panel appears (the port is remembered).',
-      'how.s4': '<b>Embedded launch</b>: the DSH core runs on the bundled Node (no popups, zero dependencies); desktop plugins add window controls / settings / update badge; the URL loads into the frameless window.',
-      'how.s5': '<b>Always guarded</b>: failures return to the launcher (errors are copyable); the full process tree is cleaned up on exit; one-click restart after a crash; updates stop the core, install, then restart — safe and crash-free.',
+      'how.s4': '<b>Embedded launch</b>: the DSH core runs on the bundled standalone Node (no console popups on Windows, zero dependencies); desktop plugins add window controls / settings / update badge; the URL loads into the frameless window.',
+      'how.s5': '<b>Always guarded</b>: failures return to the launcher (errors are copyable); the full process tree is cleaned up on exit; one-click restart after a crash; plugin-caused boot failures self-heal by uninstalling the culprit; updates stop the core, install, then restart — safe and crash-free.',
+      'env.eyebrow': 'ADVANCED',
       'env.title': 'Optional environment variables',
       'env.col1': 'Variable',
       'env.col2': 'Purpose',
@@ -488,6 +779,100 @@
   };
 
   var KEY = 'dsh-desktop-lang';
+
+  /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
+  var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
+  var latestVer = 'v1.5.0';
+  var lastRelease = null;
+
+  function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function mdInline(s) {
+    s = escHtml(s);
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    return s;
+  }
+  /* 够用即好的 Markdown 子集：##/### 标题、- 列表、段落、粗体、行内代码、链接 */
+  function mdToHtml(md) {
+    var out = [], inList = false;
+    var lines = String(md || '').split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (!t) { if (inList) { out.push('</ul>'); inList = false; } continue; }
+      if (/^##\s+\[?\d+\.\d+\.\d+/.test(t)) continue; // 跳过节标题版本行，卡片头部已有版本号
+      var m;
+      if ((m = t.match(/^#{2,4}\s+(.*)/))) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push('<h4>' + mdInline(m[1]) + '</h4>');
+      } else if ((m = t.match(/^[-*]\s+(.*)/))) {
+        if (!inList) { out.push('<ul>'); inList = true; }
+        out.push('<li>' + mdInline(m[1]) + '</li>');
+      } else {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push('<p>' + mdInline(t) + '</p>');
+      }
+    }
+    if (inList) out.push('</ul>');
+    return out.join('');
+  }
+
+  /* 资产名 → 下载按钮（data-asset）；命中后改为直链并附上文件大小 */
+  function wireAssetLinks(assets) {
+    var rules = {
+      'exe': function (n) { return /\.exe$/i.test(n) && !/blockmap/i.test(n); },
+      'dmg-arm64': function (n) { return /\.dmg$/i.test(n) && /arm64/i.test(n); },
+      'dmg-x64': function (n) { return /\.dmg$/i.test(n) && !/arm64/i.test(n); },
+      'appimage': function (n) { return /\.appimage$/i.test(n); },
+      'deb': function (n) { return /\.deb$/i.test(n); },
+      'rpm': function (n) { return /\.rpm$/i.test(n); }
+    };
+    var els = document.querySelectorAll('[data-asset]');
+    for (var i = 0; i < els.length; i++) {
+      var kind = els[i].getAttribute('data-asset');
+      var match = null;
+      for (var j = 0; j < (assets || []).length; j++) {
+        if (rules[kind] && rules[kind](assets[j].name || '')) { match = assets[j]; break; }
+      }
+      if (!match) continue; // 没有对应资产就保持指向 Releases 页的兜底链接
+      els[i].href = match.browser_download_url;
+      var size = match.size ? ' · ' + (match.size / 1048576).toFixed(0) + ' MB' : '';
+      els[i].title = match.name + size;
+    }
+  }
+
+  function renderRelease() {
+    if (!lastRelease) return;
+    var dict = I18N[current] || I18N.zh;
+    var tag = document.getElementById('relTag');
+    var date = document.getElementById('relDate');
+    var body = document.getElementById('relBody');
+    if (tag) tag.textContent = lastRelease.tag_name || latestVer;
+    if (date) {
+      var d = lastRelease.published_at ? new Date(lastRelease.published_at) : null;
+      date.textContent = d && !isNaN(d.getTime())
+        ? (dict['rel.published'] || '') + d.toLocaleDateString(current === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+        : '';
+    }
+    if (body && lastRelease.body) {
+      var html = mdToHtml(lastRelease.body);
+      if (html) body.innerHTML = html;
+    }
+  }
+
+  function loadLatestRelease() {
+    fetch('https://api.github.com/repos/' + REPO + '/releases/latest')
+      .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function (rel) {
+        lastRelease = rel;
+        latestVer = rel.tag_name || latestVer;
+        wireAssetLinks(rel.assets);
+        applyLang(current); // 重渲染 {ver} 占位与发布卡片
+      })
+      .catch(function () { /* 离线/限速：静态兜底内容照常可用 */ });
+  }
 
   function detectLang() {
     var nav = (navigator.language || navigator.userLanguage || '').toLowerCase();
@@ -507,18 +892,21 @@
     var nodes = document.querySelectorAll('[data-i18n]');
     for (var i = 0; i < nodes.length; i++) {
       var key = nodes[i].getAttribute('data-i18n');
-      if (dict[key] !== undefined) nodes[i].innerHTML = dict[key];
+      if (key === 'rel.fallback' && lastRelease) continue; // 已有实时发布说明，别用兜底覆盖
+      if (dict[key] !== undefined) nodes[i].innerHTML = String(dict[key]).split('{ver}').join(latestVer);
     }
     document.documentElement.lang = (lang === 'zh') ? 'zh-CN' : 'en';
     var btn = document.getElementById('langSwitch');
     if (btn) btn.textContent = dict['lang.switch'];
     try { localStorage.setItem(KEY, lang); } catch (e) { /* ignore */ }
+    renderRelease(); // 语言切换时重排日期格式等
   }
 
   var current = getLang();
 
   document.addEventListener('DOMContentLoaded', function () {
     applyLang(current);
+    loadLatestRelease();
     var btn = document.getElementById('langSwitch');
     if (btn) {
       btn.addEventListener('click', function () {
