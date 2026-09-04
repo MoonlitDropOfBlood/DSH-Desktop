@@ -44,14 +44,32 @@ const fs = require("fs");
 const net = require("net");
 const crypto = require("crypto");
 const pluginRecoveryLib = require("./plugin-recovery.js");
+const { extractDshUrl } = require("./url-extract.js");
 
 const DEFAULT_PORT = 3080;
 
 const APP_NAME = "DeepSeek Harness Desktop";
 /** GitHub repo that hosts the shell's own releases (owner/repo). */
 const SHELL_REPO = process.env.DSH_DESKTOP_SHELL_REPO || "MoonlitDropOfBlood/DSH-Desktop";
-/** npm package + spec used for install / update / version check. */
-const DSH_SPEC = process.env.DSH_DESKTOP_SPEC || "@deepseek-ai/dsh@latest";
+/** npm dist-tag channels for the DSH core update (设置「核心」→「更新渠道」).
+ *  稳定版 = latest / 体验版 = next / 实验版 = alpha. Tags are MOVING pointers —
+ *  each resolves to whatever the registry currently pins, and a channel that
+ *  has no published version yet simply reports "no update". */
+const CORE_CHANNELS = ["latest", "next", "alpha"];
+
+/** The npm dist-tag backing the user-selected core update channel. */
+function coreChannelTag() {
+  const ch = readSettings().coreChannel;
+  return CORE_CHANNELS.indexOf(ch) >= 0 ? ch : "latest";
+}
+
+/**
+ * npm spec used for install / update / version-check of the DSH core.
+ * DSH_DESKTOP_SPEC (debug/CI override) wins over the channel selection.
+ */
+function coreSpec() {
+  return process.env.DSH_DESKTOP_SPEC || "@deepseek-ai/dsh@" + coreChannelTag();
+}
 /** Registry passed to npm. npmmirror is fast/reliable in mainland China. */
 const DEFAULT_NPM_REGISTRY = "https://registry.npmmirror.com";
 /** Alternate registries tried in order when the default is unreachable/slow. */
@@ -912,7 +930,7 @@ function installPlan() {
         // node_modules; pnpm must purge it WITHOUT an interactive prompt
         // (the splash has no TTY, a prompt would hang the install forever).
         "--config.confirmModulesPurge=false",
-        DSH_SPEC
+        coreSpec()
       ]
     };
   }
@@ -920,7 +938,7 @@ function installPlan() {
   // arg to spawn separately and Node quotes paths with spaces correctly.
   // --loglevel=info makes npm print per-request lines while downloading, so
   // the stall watchdog sees real activity (and the user sees it downloading).
-  const plan = npmSpawn(["install", "--prefix", dshDir(), "--no-save", "--no-audit", "--no-fund", "--loglevel=info", DSH_SPEC]);
+  const plan = npmSpawn(["install", "--prefix", dshDir(), "--no-save", "--no-audit", "--no-fund", "--loglevel=info", coreSpec()]);
   plan.installer = "npm";
   plan.runAsNode = false;
   return plan;
@@ -1605,9 +1623,13 @@ function handleLine(line) {
   // that stays shell-side-only and bounded.
   logTail.push(line);
   if (logTail.length > 600) logTail.shift();
-  const m = line.match(/(https?:\/\/127\.0\.0\.1:\d+)/);
-  if (m && !dshUrl) {
-    dshUrl = m[1];
+  // Core >= 0.1.2-rc.1 prints the web URL WITH an auth token (query/fragment),
+  // e.g. "dsh web: http://127.0.0.1:3080/?token=AbC…". extractDshUrl keeps the
+  // FULL URL — truncating to the bare origin would drop the token and leave the
+  // window stuck on the unauthenticated boot screen.
+  const url = extractDshUrl(line);
+  if (url && !dshUrl) {
+    dshUrl = url;
     log(`detected URL: ${dshUrl}`);
     clearWatchdog();
     sendStatus("Web 服务已就绪，正在打开…");
@@ -1955,10 +1977,11 @@ function readSettings() {
       taskNotify: json.taskNotify === true,
       inheritTerminalProfile: json.inheritTerminalProfile !== false, // default ON
       bundleMarket: json.bundleMarket !== false, // default ON
+      coreChannel: CORE_CHANNELS.indexOf(json.coreChannel) >= 0 ? json.coreChannel : "latest",
       port: /^\d+$/.test(String(json.port)) ? Number(json.port) : undefined
     };
   } catch {
-    return { autoUpdate: false, closeToTray: false, preventSleep: false, taskNotify: false, inheritTerminalProfile: true, bundleMarket: true, port: undefined };
+    return { autoUpdate: false, closeToTray: false, preventSleep: false, taskNotify: false, inheritTerminalProfile: true, bundleMarket: true, coreChannel: "latest", port: undefined };
   }
 }
 
@@ -2193,6 +2216,7 @@ function pushUpdateState() {
     taskNotify: settings.taskNotify,
     inheritTerminalProfile: settings.inheritTerminalProfile,
     bundleMarket: settings.bundleMarket,
+    coreChannel: settings.coreChannel,
     updateAvailable: Boolean(installed && latestKnown && latestKnown !== installed)
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2224,7 +2248,7 @@ function parseSpec(spec) {
  * which just skips the passive update check.
  */
 function queryLatest(cb) {
-  const { name, tag } = parseSpec(DSH_SPEC);
+  const { name, tag } = parseSpec(coreSpec());
   const reg = resolveNpmRegistry().replace(/\/+$/, "");
   const url = `${reg}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`;
   const transport = url.startsWith("https:") ? https : http;
@@ -2432,6 +2456,15 @@ ipcMain.handle("dsh:checkUpdate", () => new Promise((resolve) => {
 }));
 ipcMain.handle("dsh:setAutoUpdate", (_e, value) => {
   writeSettings({ autoUpdate: value === true });
+  return pushUpdateState();
+});
+// Switch the core update channel (稳定版=latest / 体验版=next / 实验版=alpha).
+// Persists immediately; re-queries the channel's latest so updateAvailable and
+// the "最新" display follow the new tag. The next install/update uses it too.
+ipcMain.handle("dsh:setCoreChannel", (_e, value) => {
+  const tag = CORE_CHANNELS.indexOf(value) >= 0 ? value : "latest";
+  writeSettings({ coreChannel: tag });
+  queryLatest(() => pushUpdateState());
   return pushUpdateState();
 });
 ipcMain.handle("dsh:installUpdate", () => new Promise((resolve) => {

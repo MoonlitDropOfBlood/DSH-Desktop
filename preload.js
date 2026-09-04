@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   getUpdateState: () => ipcRenderer.invoke("dsh:getUpdateState"),
   checkUpdate: () => ipcRenderer.invoke("dsh:checkUpdate"),
   setAutoUpdate: (value) => ipcRenderer.invoke("dsh:setAutoUpdate", value),
+  setCoreChannel: (value) => ipcRenderer.invoke("dsh:setCoreChannel", value),
   setCloseToTray: (value) => ipcRenderer.invoke("dsh:setCloseToTray", value),
   setPreventSleep: (value) => ipcRenderer.invoke("dsh:setPreventSleep", value),
   setTaskNotify: (value) => ipcRenderer.invoke("dsh:setTaskNotify", value),

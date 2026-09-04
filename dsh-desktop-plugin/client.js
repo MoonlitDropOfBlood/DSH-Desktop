@@ -16,9 +16,10 @@
  *      minimize; the original is hidden via CSS), so the session header keeps
  *      its natural layout and the sidebar stays flush to the top. All colors
  *      come from DSH theme tokens, so the controls track the light/dark theme.
- *   2. A settings section ("核心") showing the installed core version, a
- *      "check for updates" button, and an auto-update toggle. Feedback is shown
- *      via a Toast ("已是最新版本" / "发现新版本 …").
+ *   2. A settings section ("核心") showing the installed core version, an
+ *      update-channel selector (稳定版=latest / 体验版=next / 实验版=alpha),
+ *      a "check for updates" button, and an auto-update toggle. Feedback is
+ *      shown via a Toast ("已是最新版本" / "发现新版本 …").
  *   3. A green "update available" badge in the sidebar foot
  *      (`sidebar.footer.action`), shown when a newer core exists and
  *      auto-update is off; hidden while the sidebar is collapsed (rail).
@@ -367,7 +368,13 @@ window.__ModuleLoader__.load({
 				"（在浏览器中运行，未检测到桌面外壳）");
 		}
 
-		/** 核心: core version + update check + auto-update toggle. */
+		/** 核心: core version + update channel + update check + auto-update toggle. */
+		const CORE_CHANNELS = [
+			{ value: "latest", label: "稳定版（latest）" },
+			{ value: "next", label: "体验版（next）" },
+			{ value: "alpha", label: "实验版（alpha）" }
+		];
+		const CHANNEL_LABEL = { latest: "稳定版", next: "体验版", alpha: "实验版" };
 		function CoreSection() {
 			const state = useUpdateState();
 			const [checking, setChecking] = React.useState(false);
@@ -377,9 +384,15 @@ window.__ModuleLoader__.load({
 			const installed = state ? state.installed : null;
 			const latest = state ? state.latest : null;
 			const autoUpdate = state ? !!state.autoUpdate : false;
+			const coreChannel = state && CHANNEL_LABEL[state.coreChannel] ? state.coreChannel : "latest";
 			const updateAvailable = state ? !!state.updateAvailable : false;
 
 			const showToast = (text) => setToast({ text });
+			const setChannel = (value) => {
+				if (value === coreChannel) return;
+				bridge().setCoreChannel(value);
+				showToast(`更新渠道已切换为「${CHANNEL_LABEL[value] || value}」，检查更新将按 npm 的 ${value} 标签进行`);
+			};
 			const doCheck = () => {
 				setChecking(true);
 				bridge().checkUpdate()
@@ -406,6 +419,17 @@ window.__ModuleLoader__.load({
 					updateAvailable
 						? React.createElement("span", { className: "dsh-desktop-new" }, `最新 ${latest}`)
 						: null),
+				React.createElement("div", { className: "dsh-desktop-row" },
+					React.createElement("span", { className: "dsh-desktop-label" }, "更新渠道"),
+					React.createElement("select", {
+						className: "dsh-desktop-select",
+						value: coreChannel,
+						onChange: (e) => setChannel(e.target.value)
+					},
+					CORE_CHANNELS.map((o) =>
+						React.createElement("option", { key: o.value, value: o.value }, o.label))),
+					React.createElement("span", { className: "dsh-desktop-hint" },
+						`按 npm 的 ${coreChannel} 标签检查/安装更新`)),
 				React.createElement("div", { className: "dsh-desktop-row" },
 					React.createElement("span", { className: "dsh-desktop-label" }, "自动更新"),
 					React.createElement("label", { className: "dsh-desktop-toggle" },
@@ -674,6 +698,19 @@ window.__ModuleLoader__.load({
 .dsh-desktop-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .dsh-desktop-hint { color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 18px; }
 .dsh-desktop-actions { gap: 8px; }
+/* Update-channel select: transparent bg rides the settings panel surface in
+   both themes; color-scheme lets the native option list follow light/dark. */
+.dsh-desktop-select {
+  background: transparent;
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.35));
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color-scheme: light dark;
+}
+.dsh-desktop-select:focus { outline: none; border-color: var(--dsw-alias-label-secondary, #94a3b8); }
 
 /* Settings nav icons: DSH 0.1.x settings.section only projects
    id/order/label, and the settings shell paints a generic gear for every

@@ -79,6 +79,8 @@ dsh-desktop/
 - 开发时（`npm start`）：`bundledNode()` 回退到 `build/node/<平台-架构>`（dev 路径），与打包版 `process.resourcesPath/node` 一致；没跑 `fetch:node` 则用 Electron 内嵌。
 - **spawn 参数固定带 `--expose-internals`（node 选项，非核心参数）**：核心 rc.7+ 的启动器在组合里没有 hmr 服务时会**无条件创建** `cordis-plugin-hmr`（用于监听 `cordis.patch.yml` 热重载），而 `Hmr` 构造函数硬性要求进程以 `node --expose-internals` 启动（`ctx.loader.internal` 只在该 flag 下存在）——没有它核心会启动后片刻崩死（rc.7 与 0.1.1-rc.2 全新 home 均实测复现，CLI 裸跑 `dsh web` 同样会炸，属核心侧问题）。该 flag 放在 `bin.js` **之前**、由 node 自己消费，永远到不了核心的 commander，**对新老核心都安全、无需版本门禁**（实测两版均完整启动 + HTTP 200）。
 
+- **核心 >= 0.1.2-rc.1 打印的 URL 带认证 token，URL 提取必须保留完整行（大坑，勿截断）**：0.1.2-rc.1 起 `dsh web` 的启动链接是 `http://127.0.0.1:3080/?token=…`（query 带一次性认证 token；页面根路径交换 token 写 cookie 后跳回干净的 `/`，官方文档原话）。壳的 `handleLine` 曾用 `line.match(/(https?:\/\/127\.0\.0\.1:\d+)/)` 只截取到端口——token 直接丢掉，窗口加载无 token 的裸地址 → 页面一直卡在未认证的启动界面（"启动 web 丢失 token 卡住"的根因）。**修复**：URL 提取抽成纯函数模块 `url-extract.js`（`extractDshUrl`），匹配 `https?://127.0.0.1:\d+` 后继续吃 `[/?#]` 起的 query/fragment（`[^\s"'<>]*`，行尾标点修剪，剥 ANSI），返回**完整 URL** 交给 `waitForServerThenOpen` → `loadURL`；老核心的裸 URL 行同样兼容。**以后加正则相关改动时，先跑 `node scripts/test-url-extract.js`，绝不要把提取逻辑改回"只到端口"**。`dshUrl` 的所有消费点（布尔判断、`http.get` 探测、`loadURL`、菜单"在浏览器中打开"的 `openExternal`）都兼容带 query 的完整 URL；exit 处理器收养探测用的裸 `http://127.0.0.1:${port}` 是探活用途、不需要 token，保持不变。
+
 ### 1c. 继承终端 Profile（MCP 修复，设置"继承终端 Profile"默认开）
 
 **问题**：从 Finder/Dock 启动的 mac app 没有用户 shell 的环境变量，DSH 继承的就是这个"裸"环境，DSH 拉起的 **MCP 服务**（npx/uvx/python 等子进程）找不到可执行文件，起不来。
@@ -184,7 +186,13 @@ window.__ModuleLoader__.load({
 ### 6. 阻止休眠 / 任务通知
 
 - 阻止休眠：`powerSaveBlocker.start("prevent-app-suspension")`，返回 id，`powerSaveBlocker.stop(id)` 释放；设置持久化在 `update-settings.json`。
-- 设置项：`autoUpdate` / `closeToTray` / `preventSleep` / `taskNotify` / `bundleMarket` / `port`，都存在 `%APPDATA%\...\update-settings.json`。
+- 设置项：`autoUpdate` / `closeToTray` / `preventSleep` / `taskNotify` / `bundleMarket` / `coreChannel` / `port`，都存在 `%APPDATA%\...\update-settings.json`。
+
+### 6b. 核心更新渠道（设置「核心」→「更新渠道」）
+
+- 桌面版设置页「核心」提供**更新渠道**下拉：**稳定版=latest / 体验版=next / 实验版=alpha**（npm dist-tag，设置存 `coreChannel`，默认 `latest`）。`main.js` 的 `coreChannelTag()` 把渠道映射为 tag，`coreSpec()` 返回 `@deepseek-ai/dsh@<tag>`——**安装（`installPlan`）、版本检查（`queryLatest`）、自动更新（启动时）全部走当前渠道**；`DSH_DESKTOP_SPEC` 环境变量仍优先生效（调试/CI 覆盖）。
+- dist-tag 是**移动指针**：每次 `queryLatest` 实时解析对应 tag 的版本；某渠道暂时没有发布版本（如 alpha tag 尚未打）时 `queryLatest` 返回 null → 显示"已是最新版本"，不报错。切换渠道经 `dsh:setCoreChannel` IPC 持久化并**立刻重查**该渠道的 latest（`updateAvailable`/「最新」显示随之刷新）；下次更新安装也按新渠道。
+- tag 语义（截至 0.1.1-rc.2 验证）：`latest` 与 `next` 都存在且都指向 0.1.1-rc.2；版本线另有 0.1.2-alpha.x / 0.1.2-rc.1 预发布，`alpha` tag 属前瞻渠道。UI 文案/下拉项在 `dsh-desktop-plugin/client.js` 的 `CORE_CHANNELS`/`CHANNEL_LABEL`，加渠道或改文案改这两处即可。
 
 ### 7. 图标
 
@@ -290,7 +298,7 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_USER_DATA` | 覆盖整个 userData（托管安装/pnpm store/设置；与 `DSH_DESKTOP_HOME`+`DSH_DESKTOP_PORT` 组合可完整模拟新用户首启，单实例锁也随 userData 隔离） |
 | `DSH_DESKTOP_NPM_REGISTRY` | npm 镜像（默认 npmmirror，国内网络需要） |
 | `DSH_DESKTOP_NPM_CACHE` | npm 缓存目录 |
-| `DSH_DESKTOP_SPEC` | DSH npm 规格（默认 `@deepseek-ai/dsh@latest`） |
+| `DSH_DESKTOP_SPEC` | 覆盖 DSH npm 规格（默认按设置「更新渠道」的 tag 组成 `@deepseek-ai/dsh@<latest\|next\|alpha>`；设了此变量则优先生效，用于调试/CI） |
 | `DSH_DESKTOP_TIMEOUT` | 启动看门狗超时秒数（默认 1800s） |
 | `DSH_DESKTOP_INSTALL_ESTIMATE_MB` | 安装进度条估算总大小（默认 250MB） |
 | `DSH_DESKTOP_INSTALL_STALL_SECONDS` | 下载无进展判定秒数（默认 120s，超时 kill npm） |
