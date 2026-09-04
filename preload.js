@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   setPreventSleep: (value) => ipcRenderer.invoke("dsh:setPreventSleep", value),
   setTaskNotify: (value) => ipcRenderer.invoke("dsh:setTaskNotify", value),
   setInheritTerminalProfile: (value) => ipcRenderer.invoke("dsh:setInheritTerminalProfile", value),
+  setAllowFloatWindows: (value) => ipcRenderer.invoke("dsh:setAllowFloatWindows", value),
   setBundleMarket: (value) => ipcRenderer.invoke("dsh:setBundleMarket", value),
   installUpdate: () => ipcRenderer.invoke("dsh:installUpdate"),
   restartApp: () => ipcRenderer.invoke("dsh:restartApp"),
@@ -37,5 +38,17 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   checkShellUpdate: () => ipcRenderer.invoke("dsh:checkShellUpdate"),
   downloadShellUpdate: () => ipcRenderer.invoke("dsh:downloadShellUpdate"),
   onShellDownloadProgress: (cb) => subscribe("dsh:shellDownloadProgress", cb),
-  onUpdateState: (cb) => subscribe("dsh:update-state", cb)
+  onUpdateState: (cb) => subscribe("dsh:update-state", cb),
+  // ---- phase-2 extension surface (client plugins) --------------------------
+  // Window/taskbar capabilities: action in { progress {value:-1..2}, flash
+  // {flag}, badge {text}, overlay {dataUrl,description}, alwaysOnTop {flag},
+  // show, hide, minimize } — resolves to { ok, error? }.
+  windowAction: (action, params) => ipcRenderer.invoke("dsh:windowAction", { action, ...(params || {}) }),
+  // Per-plugin settings KV persisted by the shell (update-settings.json
+  // `plugins` bucket). get(plugin) -> whole bucket; get(plugin, key) -> one
+  // value (null when absent); set(plugin, key, value) — null value deletes.
+  pluginSettingsGet: (plugin, key) => ipcRenderer.invoke("dsh:pluginSettings", { op: "get", plugin, key }),
+  pluginSettingsSet: (plugin, key, value) => ipcRenderer.invoke("dsh:pluginSettings", { op: "set", plugin, key, value }),
+  // Shell event bus: { event: "window.visibility"|"core.lifecycle", data }.
+  onShellEvent: (cb) => subscribe("dsh:shell-event", cb)
 });

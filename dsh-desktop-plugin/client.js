@@ -460,6 +460,7 @@ window.__ModuleLoader__.load({
 			const preventSleep = state ? !!state.preventSleep : false;
 			const taskNotify = state ? !!state.taskNotify : false;
 			const inheritTerminalProfile = state ? state.inheritTerminalProfile !== false : true;
+			const allowFloatWindows = state ? state.allowFloatWindows !== false : true;
 			const bundleMarket = state ? state.bundleMarket !== false : true;
 
 			// Shell self-update progress pushes from the main process.
@@ -511,6 +512,10 @@ window.__ModuleLoader__.load({
 			const toggleNotify = () => {
 				bridge().setTaskNotify(!taskNotify);
 				setToast({ text: !taskNotify ? "已开启：主任务完成、失败或需确认时发送桌面通知" : "已关闭：不再发送任务通知" });
+			};
+			const toggleFloat = () => {
+				bridge().setAllowFloatWindows(!allowFloatWindows);
+				setToast({ text: !allowFloatWindows ? "已开启：插件可创建桌面浮窗（如桌面宠物）" : "已关闭：插件浮窗已全部关闭" });
 			};
 			const toggleTerminalProfile = () => {
 				bridge().setInheritTerminalProfile(!inheritTerminalProfile);
@@ -584,9 +589,25 @@ window.__ModuleLoader__.load({
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"内置插件市场（dshmarket）：随壳自带、免下载安装，可浏览/搜索/一键安装社区插件。若你已在 DSH profile 中自行安装过插件市场，以你的安装为准（不会重复挂载）；改动需重启 DSH 生效。"),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					"任务通知：主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）。")
+					"任务通知：主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）。"),
+				React.createElement("div", { className: "dsh-desktop-row" },
+					React.createElement("span", { className: "dsh-desktop-label" }, "允许插件浮窗"),
+					React.createElement("label", { className: "dsh-desktop-toggle" },
+						React.createElement("input", { type: "checkbox", checked: allowFloatWindows, onChange: toggleFloat }),
+						React.createElement("span", null, allowFloatWindows ? "已开启" : "已关闭"))),
+				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
+					"允许插件创建桌面悬浮窗口（如随任务状态变化的桌面宠物）。关闭后现有浮窗立即消失，插件也无法再创建。")
 			);
 		}
+
+		// ---- 插件设置扩展点 ------------------------------------------------------
+		// Client plugins that need settings UI register a FULL PAGE through the
+		// core's own slot: ctx.slots.register({ name: "settings.section", id,
+		// order, label }, Component) — the 桌面版 section itself mounts that way.
+		// Persistence for such pages is the shell's plugin settings KV:
+		// dshDesktop.pluginSettingsGet/Set (host plugins: settings.get/set RPC).
+		// There is deliberately NO declarative per-row schema layer; anything a
+		// row-level API could do, a settings.section page does better.
 
 		const CSS = `
 /* Window controls: a 36px-tall strip along the very top of the frame. It starts
@@ -697,6 +718,8 @@ window.__ModuleLoader__.load({
 .dsh-desktop-new { color: #22c55e; font-weight: 600; }
 .dsh-desktop-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .dsh-desktop-hint { color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 18px; }
+/* Sub-header grouping the schema-driven plugin settings area (phase 2). */
+.dsh-desktop-subhead { margin-top: 6px; color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; }
 .dsh-desktop-actions { gap: 8px; }
 /* Update-channel select: transparent bg rides the settings panel surface in
    both themes; color-scheme lets the native option list follow light/dark. */

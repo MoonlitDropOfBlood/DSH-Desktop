@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="build/whale.svg" alt="DeepSeek Harness Desktop" width="120">
+  <img src="build/whale.svg" alt="鲸港 WhaleHarbor" width="120">
 </p>
+
+<h1 align="center">鲸港 WhaleHarbor</h1>
 
 <h3 align="center">为 DeepSeek Harness 打造的桌面端体验</h3>
 
@@ -15,7 +17,9 @@
 
 ---
 
-把 **DeepSeek Harness（DSH）** 包装成一个原生桌面应用。它负责窗口、托盘、更新与桌面运行环境，同时完整保留官方 DSH 的智能体、模型、工具、会话与 Web UI。
+**鲸港 WhaleHarbor** 把 **DeepSeek Harness（DSH）** 包装成一个原生桌面应用。它负责窗口、托盘、更新与桌面运行环境，同时完整保留官方 DSH 的智能体、模型、工具、会话与 Web UI。
+
+> 显示品牌为「鲸港 WhaleHarbor」；包名与内部标识（`dsh-desktop`、`DSH_DESKTOP_*` 环境变量等）沿用历史命名，行为不变。
 
 **DSH 核心不打进安装包**：目标机器首次启动时自动通过内置 pnpm 安装最新版 DSH，之后直接复用本机已有的完整安装——既保持轻量，又能随时更新到最新。
 
@@ -115,6 +119,62 @@ npm start
        └─ 退出时 kill 整棵进程树；崩溃时一键重启
        └─ 任务事件经本地桥转发 → 桌面通知（可开关）
 ```
+
+## 插件扩展点（RPC 桥）
+
+DSH 插件可以调用桌面壳的能力：桌面通知、托盘右键菜单、插件设置 KV、窗口/任务栏控制、壳事件订阅。壳在本地起一个 HTTP JSON-RPC 桥——只绑 `127.0.0.1`、每次启动**随机端口 + 随机令牌**，令牌只通过环境变量传给 DSH 进程，网页与无关本地进程无法调用。
+
+### Host 半部（运行在 DSH 进程内的插件）
+
+从 `process.env.DSH_DESKTOP_NOTIFY_PORT` / `DSH_DESKTOP_NOTIFY_TOKEN` 读地址与令牌，`POST http://127.0.0.1:<port>/`，带 `x-dsh-notify-token` 头，body 为 `{ "method": "...", "params": { ... } }`；响应 `{ ok: true, ... }` 或 `{ ok: false, error }`。网络失败按 1.5s~20s 退避重试几次；收到 `ok:false` 说明对端壳无此方法（旧版本），不必重试。
+
+| 方法 | 参数 | 说明 |
+| --- | --- | --- |
+| `bridge.register` | `plugin`, `eventPort?`, `events?` | 注册插件（`notify`/`tray`/`window.*` 前先注册；`settings.*` 不要求）。`eventPort` 是插件自起的 `127.0.0.1` HTTP 端口，壳把托盘点击与订阅事件回投到它（`POST {event, data}`，同一令牌）；`events` 可订阅 `window.visibility`（显示/聚焦/最小化快照）、`core.lifecycle`（starting/ready/restarting/exited） |
+| `notify.show` | `kind?`, `title?`, `body?`, `force?` | 桌面通知。`kind=done/error/approval` 有默认文案；`force:true` 绕过「窗口聚焦时不弹」抑制（用户显式动作的回执用）；受设置「任务通知」总开关约束 |
+| `tray.setMenu` | `plugin`, `items` | 贡献托盘右键菜单分区（`[{id, label, enabled?}]`，≤10 项），点击回投 `{event:"tray.click", id}` |
+| `settings.get` / `settings.set` | `plugin, key?` / `plugin, key, value` | 插件设置 KV（value 限 string/number/boolean，`null` 删除该 key），持久化在壳的设置文件里 |
+| `window.*` | 见左列 | `window.progress {value}`（任务栏进度：-1 清除 / 0..1 确定 / >1 不确定）、`window.flash {flag}`（闪烁，窗口获焦自动停）、`window.badge {text}`（macOS Dock / Linux 角标数）、`window.overlay {dataUrl}`（Windows 任务栏角标图）、`window.alwaysOnTop {flag}`、`window.show` / `window.hide` / `window.minimize` |
+| `float.window.*` | `create / state / move / close / closeAll` | 插件浮窗（桌面宠物、迷你状态条等）：创建小型透明置顶悬浮窗——永不抢焦点、不进任务栏；`state` 下行推送 JSON 状态（宠物页面 `__dshFloat.onState` 接收），页面点击经 `__dshFloat.send` 回投；核心重启/退出自动清理，限额每插件 3 个，设置「允许插件浮窗」可整体关闭 |
+
+最小示例（注册 + 托盘菜单 + 通知）：
+
+```js
+// DSH 插件 Host 半部的 apply(ctx) 里
+const port = process.env.DSH_DESKTOP_NOTIFY_PORT;
+const token = process.env.DSH_DESKTOP_NOTIFY_TOKEN;
+if (!port || !token) return; // 非桌面壳环境（裸 dsh 命令行），静默跳过
+const call = (method, params = {}) => fetch(`http://127.0.0.1:${port}/`, {
+  method: "POST",
+  headers: { "content-type": "application/json", "x-dsh-notify-token": token },
+  body: JSON.stringify({ method, params })
+}).then((r) => r.json()).catch(() => {});
+
+call("bridge.register", { plugin: "my-plugin", eventPort: myEventServerPort, events: ["core.lifecycle"] });
+call("tray.setMenu", { plugin: "my-plugin", items: [{ id: "hello", label: "打个招呼" }] });
+call("notify.show", { kind: "done", title: "任务完成" });
+```
+
+托盘点击与订阅的事件会 POST 到你上报的 `eventPort`（同一个令牌头），自行起个小 HTTP 服务接收即可。
+
+### Client 半部（运行在 DSH 页面里的插件）
+
+桌面壳给页面注入 `window.dshDesktop`（普通浏览器直接访问同一页面时**不存在**，用前判空）：
+
+- `windowAction(action, params)` —— 与 `window.*` RPC 同一实现
+- `pluginSettingsGet(plugin, key)` / `pluginSettingsSet(plugin, key, value)` —— 同一 KV
+- `onShellEvent(cb)` —— 接收壳事件
+
+### 设置页
+
+插件需要设置 UI 时，用核心 Cordis 的 `settings.section` 槽挂一个**整页**（桌面版设置区自身就是这么挂的）：
+
+```js
+// 客户端插件，需 exports.inject = ["slots"]
+ctx.slots.register({ name: "settings.section", id: "my-plugin", order: 50, label: "我的插件" }, MySettingsPage);
+```
+
+持久化用上面的插件设置 KV（Host 侧 `settings.get/set`，页面侧 `dshDesktop.pluginSettingsGet/Set`）。壳刻意不提供行级声明式设置项——整页槽能覆盖全部场景。
 
 ## 环境变量（可选）
 

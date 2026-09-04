@@ -8,6 +8,27 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-04
+
+### 变更
+
+- **显示品牌更名「鲸港 WhaleHarbor」**（GitHub 上 DSH-Desktop 重名过多）：启动页标题/标题条、窗口/托盘显示名（`APP_NAME`）、README、宣传页、生成 patch 注释全部换新品牌。**内部标识一律不变**——`package.json` 的 `productName`/`name`（决定 userData 路径与安装身份，动了会丢设置/并存安装）、npm 包名、`DSH_DESKTOP_*` 环境变量、`dsh:*` IPC 通道、`dsh-desktop-plugin` 插件包名，对现有用户零影响。
+
+### 修复
+
+- **手编 `update-settings.json` 带 UTF-8 BOM 导致全部设置静默失效**：`readSettings()` 的裸 `JSON.parse` 遇 BOM 直接抛异常、整份设置回落默认（`port`/`coreChannel` 等全部瞬间丢失）。现解析前剥 BOM。排查启示：PowerShell `Set-Content -Encoding utf8` 在部分宿主上会写出 BOM，改设置文件请用编辑器或 `utf8NoBOM`。
+
+### 新增
+
+- **插件 RPC 桥（壳扩展点一期）**：原单用途"通知桥"泛化为双向 JSON-RPC 通道，DSH 插件的 Host 半部现在可以调用壳能力。首批三个方法：① `bridge.register`——插件注册自己 + 上报反向事件端口（插件在 DSH 进程内自起 127.0.0.1 小服务器，壳→插件事件回投走同一 token 认证）；② `notify.show`——通用原生通知（`kind=done/error/approval` 保留默认文案，任意 title/body 亦可；`force:true` 只绕过焦点抑制，保留给用户显式动作的回执；`taskNotify` 总开关永远生效）；③ `tray.setMenu`——**托盘右键菜单贡献**：插件声明式提交菜单项（每插件一个分区、最多 10 项），点击经反向通道回投 `{ event: "tray.click", id }`。生命周期：新核心代际 spawn 时与核心死透时自动清空全部注册/贡献，插件随核心启动重注册。安全模型不变：127.0.0.1 绑定 + 每次启动随机端口/随机 bearer token + 外部 Origin 403 + 4KB 上限；旧形态 `{ kind, summary }` 通知 POST 完全兼容。可观测性：通知被抑制（开关关闭/窗口聚焦）、反向投递失败、未注册插件事件全部写主日志。
+- **托盘新增「任务状态」实时项**：`dsh-desktop-plugin` 作为 RPC 桥首个消费者，在托盘菜单实时显示主 agent 状态（空闲 / 运行中(N) / 有操作待确认，subagent 照常过滤），点击该项弹一条带当前状态详情的通知。
+- **窗口/任务栏能力（壳扩展点二期）**：RPC 桥新增 `window.progress`（任务栏进度：-1 清除 / 0..1 确定 / >1 不确定）、`window.flash`（任务栏闪烁，窗口获焦自动停止）、`window.badge`（macOS Dock / Linux 启动器角标，Windows 空操作）、`window.overlay`（Windows 任务栏角标图标）、`window.alwaysOnTop`、`window.show` / `window.hide` / `window.minimize`；客户端插件经 `dshDesktop.windowAction(action, params)` IPC 使用同一实现。
+- **壳事件总线（二期）**：插件可订阅 `window.visibility`（窗口显示/聚焦/最小化快照）与 `core.lifecycle`（starting / ready / restarting / exited）。Host 插件在 `bridge.register` 里声明 `events` 列表、经反向通道接收；客户端插件用 `dshDesktop.onShellEvent(cb)`。
+- **插件设置 KV（二期）**：壳提供按插件命名空间的键值存储（`settings.get`/`settings.set` RPC 与 `dshDesktop.pluginSettingsGet/Set` IPC 同一实现），持久化在 `update-settings.json` 的 `plugins` 桶。插件需要设置 UI 时直接用核心的 `settings.section` 槽挂整页（桌面版设置区自身就是这么挂的），持久化走该 KV；壳不另设行级声明式 schema 层。
+- **任务栏实时反馈**：`dsh-desktop-plugin` 消费二期能力——主 agent 运行期间任务栏显示不确定进度条（全部完成后清除），主 agent 出错或等待审批时任务栏按钮闪烁直到窗口获焦。顺带修复一期重写引入的「任务完成通知从未发送」（`wasRunning` 引用未定义变量、被 catch 吞掉）。
+- **e2e 钩子**：`DSH_DESKTOP_NOTIFY_TOKEN` 环境变量可钉住桥 token（仅供自动化测试直调桥方法，生产勿设）。
+- **插件浮窗 `float.window.*`（桌面宠物等二级悬浮窗口）**：插件可创建小型透明置顶悬浮窗——无边框、不进任务栏、`focusable:false` 永不抢焦点（`showInactive` 显示）。`create {html|url, width, height, x?, y?, transparent?, clickThrough?}`：`html` 内联（data: 加载，≤256KB）或 `url` 仅允许插件自己的 `127.0.0.1` 服务器（富内容自建双向通道）；`state` 下行推 JSON（≤2.5KB，**替换最新值**，壳缓存并在页面加载完成后补发）；`move`（钳制进工作区）/`close`/`closeAll`。页面交互上行：浮窗专用迷你 preload（`float-preload.js`，仅暴露 `__dshFloat.onState/.send`，绝不给主窗口桥面）→ 反向通道 `float.window.input`；崩溃回投 `float.window.closed`。拖动零协议（页面自带 `-webkit-app-region: drag`）。**浮窗随核心代际走**：`resetBridgeContributions()`/主窗口真关闭/退出时统一销毁，核心死了绝不留孤儿宠物。限额每插件 3、全局 6；用户总开关「允许插件浮窗」（默认开，关闭立即清场）。`bridge.register` 响应新增 `capabilities` 数组供特性探测。e2e：`scripts/e2e-float-window.js`（15 项断言）；设计全文 `designs/float-window.md`。
+
 ## [1.6.1] - 2026-09-04
 
 ### 修复
