@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-04
+
+### 修复
+
+- **核心 0.1.2-rc.1+ 启动链接 token 丢失，窗口一直卡在认证界面**：核心新版 `dsh web` 打印的启动链接会携带一次性认证 token（`http://127.0.0.1:3080/?token=…`，页面根路径交换 token 写 cookie 后跳回干净的 `/`）。壳的 `handleLine` 原来用 `line.match(/(https?:\/\/127\.0\.0\.1:\d+)/)` 只截取到端口号——query 里的 token 被直接丢弃，窗口加载无 token 的裸地址，页面以未认证状态启动、永远停在认证等待。修复：URL 提取抽成纯函数模块 `url-extract.js`（`extractDshUrl`），匹配端口后继续保留 `[/?#]` 起的 query/fragment（剥离 ANSI 转义、修剪行尾标点），老核心的裸 URL 行完全兼容；配套单测 `scripts/test-url-extract.js`（13 组断言）。**注意：以后改 URL 提取逻辑先跑 `node scripts/test-url-extract.js`，绝不要把提取改回"只到端口"。**
+- **打包白名单漏掉 `url-extract.js`**：electron-builder 的 `build.files` 白名单未包含新增模块，导致安装包里 `main.js` 加载 `./url-extract.js` 失败；已补上（`main.js` 引用的两个本地模块 `plugin-recovery.js` 与 `url-extract.js` 均在白名单内）。
+
+### 新增
+
+- **核心更新渠道选择（稳定版 / 体验版 / 实验版）**：桌面版设置页「核心」新增「更新渠道」下拉——**稳定版=latest / 体验版=next / 实验版=alpha**（npm dist-tag，设置存 `update-settings.json` 的 `coreChannel`，默认 `latest`）。安装（`installPlan`）、版本检查（`queryLatest`）、启动自动更新（`checkForUpdatesOnStartup`）全部按所选渠道解析 tag；切换渠道经 `dsh:setCoreChannel` IPC 持久化并立即重查该渠道最新版本（`updateAvailable`/「最新」显示即时刷新）。dist-tag 是移动指针，某渠道暂无发布版本时静默显示"已是最新版本"，不报错。`DSH_DESKTOP_SPEC` 环境变量仍优先生效（调试/CI 覆盖）。
+
 ## [1.5.0] - 2026-08-29
 
 ### 修复
