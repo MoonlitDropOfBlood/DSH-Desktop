@@ -110,6 +110,17 @@ const ADOPT_RESTART_GRACE_MS = 12000;
  */
 const PORT_RELEASE_WAIT_MS = 10000;
 
+/**
+ * Headless boot check for a freshly updated core before the shell commits to
+ * it (updateDSH → smokeBootDSH). A broken tree (version skew, bad bundle)
+ * dies at import within seconds of `bin.js` booting — far cheaper to catch
+ * on a scratch port than after the update replaced a working core.
+ * DSH_DESKTOP_SMOKE_SECONDS overrides (production never sets it).
+ */
+const SMOKE_BOOT_TIMEOUT_MS = (Number(process.env.DSH_DESKTOP_SMOKE_SECONDS) > 0
+  ? Number(process.env.DSH_DESKTOP_SMOKE_SECONDS)
+  : 90) * 1000;
+
 let mainWindow = null;
 let dshProc = null;
 let dshUrl = null;
@@ -227,6 +238,12 @@ process.on("unhandledRejection", (reason) => {
 let isUpdating = false;
 /** Callback for the in-page install-failure retry / switch-mirror / keep-current actions. */
 let pendingInstallCb = null;
+// True while updateDSH has parked the working install at dsh.prev: install
+// failures must keep offering 「用当前版本继续」 even though resolveDSHBin()
+// finds nothing under dsh/ (the old tree lives under the park name), and the
+// continue/rollback paths restore it from there. Survives installWithRetry
+// re-invocations from the panel's 重试/换镜像 buttons.
+let updateParkedTree = false;
 
 // ---- helpers ---------------------------------------------------------------
 /** Resolved lazily on first write (after the DSH_DESKTOP_USER_DATA override). */
@@ -894,6 +911,16 @@ function prepareManagedDir() {
     }
     // An npm-era package-lock.json is meaningless to pnpm — drop it.
     try { fs.rmSync(path.join(dshDir(), "package-lock.json"), { force: true }); } catch { /* ignore */ }
+    // A stale pnpm-lock.yaml is a LIABILITY here, never an asset: the shell
+    // only ever runs `pnpm add <spec>` (full re-resolution every time), but a
+    // lockfile carried over from the PREVIOUS version line lets the peer
+    // resolver reuse old snapshots across a version-line jump. Measured
+    // 2026-09-04: 0.1.1-rc.2 → 0.1.2-rc.1 update resolved dsh-subagent@0.1.2-
+    // rc.1's peer `@deepseek-ai/dsh-attachment: ^0.1.2-rc.1` to the stale
+    // 0.1.1-rc.2 instance (frozen in the old lockfile) → core died at import
+    // ("does not provide an export named 'admitPromptContent'"). A fresh
+    // resolve with no lockfile was proven to pick 0.1.2-rc.1 correctly.
+    try { fs.rmSync(path.join(dshDir(), "pnpm-lock.yaml"), { force: true }); } catch { /* ignore */ }
     const pj = path.join(dshDir(), "package.json");
     if (!fs.existsSync(pj)) {
       fs.writeFileSync(pj, JSON.stringify({ name: "dsh-managed", private: true }, null, 2) + "\n", "utf8");
@@ -911,28 +938,61 @@ function prepareManagedDir() {
  * Every argument stays a SEPARATE argv entry (Windows quoting trap — see the
  * runInstaller comment).
  */
+/**
+ * True when the update TARGET (latestKnown — the channel tag's resolved
+ * version) is 0.1.2+: that release optimized the published peer-dependency
+ * graph, which took npm from a >10min resolution blowup on the 0.1.1-era tree
+ * (measured, npm 11.17) to a 23.7s full install (measured 2026-09-04). npm
+ * also resolves peers independently by semver range, so it structurally
+ * cannot reproduce the pnpm stale-peer-reuse skew behind the 2026-09-04
+ * mixed-version incident. Unknown target → false (pnpm always works).
+ */
+function targetLineSupportsNpm() {
+  const m = String(latestKnown || "").match(/^(\d+)\.(\d+)\.(\d+)(?:-[a-z]+\.(\d+))?$/);
+  if (!m) return false;
+  return compareVersions(`${m[1]}.${m[2]}.${m[3]}`, "0.1.2") >= 0;
+}
+
+/** npm is not bundled — it comes from the user's PATH (or DSH_DESKTOP_NPM). */
+function npmOnPath() {
+  try {
+    execFileSync(process.platform === "win32" ? "where" : "which", ["npm"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function installPlan() {
-  const pnpmCli = resolvePnpmCli();
-  if (pnpmCli) {
-    const runtime = dshRuntime();
-    return {
-      installer: "pnpm",
-      command: runtime.command,
-      runAsNode: runtime.runAsNode,
-      args: [
-        pnpmCli, "add",
-        "--dir", dshDir(),
-        "--store-dir", pnpmStoreDir(),
-        // Line-per-line progress parseable by both the splash log and the
-        // stall watchdog (the default TTY renderer emits escape sequences).
-        "--reporter=append-only",
-        // An existing managed dir may hold a FOREIGN (npm-installed)
-        // node_modules; pnpm must purge it WITHOUT an interactive prompt
-        // (the splash has no TTY, a prompt would hang the install forever).
-        "--config.confirmModulesPurge=false",
-        coreSpec()
-      ]
-    };
+  // DSH_DESKTOP_INSTALLER=npm|pnpm forces a choice (debugging / rollback);
+  // otherwise pnpm stays the workhorse except for ≥0.1.2 targets, where npm
+  // is equally fast and immune to the peer-reuse skew (see
+  // targetLineSupportsNpm). No PATH npm (bare machines) → pnpm, always.
+  const forced = String(process.env.DSH_DESKTOP_INSTALLER || "").trim().toLowerCase();
+  const wantNpm = forced === "npm" || (forced !== "pnpm" && targetLineSupportsNpm() && npmOnPath());
+  if (!wantNpm) {
+    const pnpmCli = resolvePnpmCli();
+    if (pnpmCli) {
+      const runtime = dshRuntime();
+      return {
+        installer: "pnpm",
+        command: runtime.command,
+        runAsNode: runtime.runAsNode,
+        args: [
+          pnpmCli, "add",
+          "--dir", dshDir(),
+          "--store-dir", pnpmStoreDir(),
+          // Line-per-line progress parseable by both the splash log and the
+          // stall watchdog (the default TTY renderer emits escape sequences).
+          "--reporter=append-only",
+          // An existing managed dir may hold a FOREIGN (npm-installed)
+          // node_modules; pnpm must purge it WITHOUT an interactive prompt
+          // (the splash has no TTY, a prompt would hang the install forever).
+          "--config.confirmModulesPurge=false",
+          coreSpec()
+        ]
+      };
+    }
   }
   // NOTE: pass the prefix path RAW (no JSON.stringify) — npmSpawn hands each
   // arg to spawn separately and Node quotes paths with spaces correctly.
@@ -1163,6 +1223,20 @@ function stagePackage(srcDir, name, dstDir, mode) {
  *              INSERTs the mount row (also with allowRestart:false).
  *  - null:     no market row (feature switched off, or the bundle is missing).
  */
+/**
+ * True when the installed core auto-mounts profile node_modules packages
+ * during bundle composition (0.1.2+): a shell-staged dshmarket then becomes a
+ * loader entry BY ITSELF, so the shell's patch must OVERRIDE that entry
+ * (`- id:`) instead of INSERTing a second one — measured 2026-09-04: rc.1 +
+ * staged market + insert row = "duplicate loader entry id: dsh-market" boot
+ * crash. 0.1.1.x does not auto-mount (the insert row is required there).
+ */
+function coreAutoMountsProfilePackages() {
+  const m = String(readInstalledVersion() || "").match(/^(\d+)\.(\d+)\.(\d+)(?:-[a-z]+\.(\d+))?$/);
+  if (!m) return false;
+  return compareVersions(`${m[1]}.${m[2]}.${m[3]}`, "0.1.2") >= 0;
+}
+
 function prepareBundledMarket() {
   const profileDir = path.join(dshHomeDir(), "profiles", "web");
   try {
@@ -1197,6 +1271,12 @@ function prepareBundledMarket() {
   stagePackage(srcDir, "dshmarket", dstDir, "always");
   for (const dep of ["js-yaml", "undici", "argparse"]) stagePackage(srcDir, dep, dstDir, "compatible");
   log(`bundled market staged into ${dstDir}`);
+  if (coreAutoMountsProfilePackages()) {
+    // The core mounts the staged copy on its own; the patch must not INSERT a
+    // second row — prepareDesktopPlugin emits the override form instead.
+    log("bundled market: core auto-mounts profile node_modules packages — patch will override its entry, not insert");
+    return "staged-auto";
+  }
   return "staged";
 }
 
@@ -1244,7 +1324,7 @@ function prepareDesktopPlugin() {
         "      # own restart would spawn a rogue core and look like a crash here.\n" +
         "      allowRestart: false\n";
       hasRows = true;
-    } else if (marketMode === "user") {
+    } else if (marketMode === "staged-auto" || marketMode === "user") {
       patch +=
         "# The profile mounts its own dshmarket copy — never INSERT a second row\n" +
         "# (Cordis `- insert:` appends unconditionally and would mount it TWICE).\n" +
@@ -1316,6 +1396,21 @@ function installDSH(cb) {
   sendStatus(`正在安装最新版 DSH（${plan.installer}，镜像：${reg}）…\n首次安装约 ${INSTALL_ESTIMATE_MB}MB，可能需要几分钟。`);
   log(`installing dsh via ${reg} (${plan.installer})`);
   if (plan.installer === "pnpm") prepareManagedDir(); // pnpm add needs a package.json; purge npm-era node_modules
+  else {
+    // Mirror policy: a pnpm-era managed dir (symlink farm + .modules.yaml) is
+    // foreign to npm's flat layout — purge it so npm builds a clean tree
+    // instead of tripping over junctions. Safe: the core is stopped and the
+    // previous version is parked at dsh.prev during updates.
+    const nm = path.join(dshDir(), "node_modules");
+    try {
+      if (fs.existsSync(path.join(nm, ".modules.yaml"))) {
+        log("removing pnpm-era node_modules before npm install");
+        fs.rmSync(nm, { recursive: true, force: true });
+      }
+    } catch (err) {
+      log(`pnpm-era purge failed (continuing): ${err.message}`);
+    }
+  }
   const dirs = plan.installer === "pnpm" ? [pnpmStoreDir(), dshDir()] : [dshDir()];
   const meter = createSizeMeter(dirs);
   const stopProgress = trackInstallProgress(meter);
@@ -1327,7 +1422,7 @@ function installDSH(cb) {
       cb({ ok: true, code: 0, errTail: "" });
       return;
     }
-    log(`install failed code=${code} (${plan.installer})`);
+    log(`install failed code=${code} (${plan.installer})${errTail ? `\n${errTail.slice(-600)}` : ""}`);
     cb({ ok: false, code, errTail });
   });
 
@@ -1385,7 +1480,10 @@ function installWithRetry(cb) {
   installDSH((result) => {
     if (result.ok) { pendingInstallCb = null; cb(result); return; }
     if (quitRequested) { app.quit(); return; }
-    const hasExisting = !!resolveDSHBin();
+    // During an update the working tree may be parked at dsh.prev (nothing
+    // under dsh/ for resolveDSHBin to find) — the old version still exists
+    // and "用当前版本继续" must stay available.
+    const hasExisting = updateParkedTree || !!resolveDSHBin();
     pendingInstallCb = cb;
     showStartupError({
       message: "安装 DSH 失败",
@@ -2282,6 +2380,233 @@ function queryLatest(cb) {
  * new version.
  * cb(updated) — true when the new core was installed and is restarting.
  */
+// ---- update safety: park the old tree, smoke-boot the new one --------------
+
+/** Directory that briefly holds the PREVIOUS managed install during an update.
+ *  Same volume as dshDir(), so the rename is a metadata op, not a copy. */
+function parkedDshDir() {
+  return dshDir() + ".prev";
+}
+
+/**
+ * Move the current managed install aside so the update installs into a FRESH
+ * directory (also sidesteps the stale-state reuse that mixed version lines on
+ * 2026-09-04). This is the rollback guarantee: if the new tree fails to
+ * install or fails its smoke boot, restoring the old one is a single rename —
+ * no network, no reinstall, no user-visible state beyond the restart itself.
+ * Returns true when the park happened.
+ */
+function parkManagedDirForUpdate() {
+  const prev = parkedDshDir();
+  try {
+    fs.rmSync(prev, { recursive: true, force: true }); // leftover of an interrupted update
+    if (!fs.existsSync(dshDir())) return false; // first install — nothing to park
+    fs.renameSync(dshDir(), prev);
+    log("update: parked current install at dsh.prev (rollback anchor)");
+    return true;
+  } catch (err) {
+    // Rare (AV/indexer holding a handle on the tree). Fall back to the
+    // historical in-place install; the smoke boot still guards the commit.
+    log(`update: could not park managed dir (${err.message}) — installing in place`);
+    return false;
+  }
+}
+
+/** Swap the parked previous install back in. Returns true when restored.
+ *
+ *  NEVER rmSync the target before renaming onto it: a freshly "deleted" tree
+ *  stays delete-pending on Windows for a while (AV / system handles keep
+ *  share-delete handles open), the name lingers in the namespace, and rename
+ *  onto it EPERMs — measured 3/3 failures (retries at 1.5s/3s included) in the
+ *  update e2e, followed by the shell respawn-ing a core from the vaporized
+ *  tree. Instead: rename the broken tree ASIDE (rename works on live trees —
+ *  the park itself proves it), rename the old tree in, delete the strays
+ *  asynchronously. Retried with backoff for anything that still races. */
+function restoreParkedManagedDir() {
+  const prev = parkedDshDir();
+  if (!fs.existsSync(prev)) return false;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const side = dshDir() + ".broken-" + Date.now();
+    let movedAside = false;
+    try {
+      if (fs.existsSync(dshDir())) {
+        fs.renameSync(dshDir(), side);
+        movedAside = true;
+      }
+      try {
+        fs.renameSync(prev, dshDir());
+      } catch (err) {
+        // Keep the state coherent for the next attempt: put the broken tree
+        // back where resolveDSHBin expects it.
+        if (movedAside) { try { fs.renameSync(side, dshDir()); } catch { /* ignore */ } }
+        throw err;
+      }
+      log("update: restored previous install from dsh.prev");
+      if (movedAside) fs.rm(side, { recursive: true, force: true }, () => { /* best effort */ });
+      return true;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) {
+        const wait = attempt * 2000;
+        log(`update rollback: rename busy (${err.code || err.message}) — retry ${attempt}/2 in ${wait}ms`);
+        syncSleep(wait);
+      }
+    }
+  }
+  log(`update: FAILED to restore parked install: ${lastErr ? lastErr.message : "unknown"}`);
+  return false;
+}
+
+/** Synchronous sleep for the main process — only used where the update flow
+ *  must not proceed until the filesystem has settled (no UI interactivity is
+ *  expected mid-update; the splash is static). */
+function syncSleep(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* ignore */ }
+}
+
+/** Drop the parked tree after a successful update (async — up to a few seconds
+ *  of unlinking, must not block the restart chain). */
+function discardParkedManagedDir() {
+  const prev = parkedDshDir();
+  fs.rm(prev, { recursive: true, force: true }, () => { /* best effort */ });
+}
+
+/** Kill a spawned process tree without touching any shell lifecycle state.
+ *  done() fires once the kill was REQUESTED and given a moment to propagate —
+ *  callers do filesystem surgery on the tree afterwards and must not race the
+ *  dying process's releasing handles. */
+function killTree(child, done) {
+  let settled = false;
+  const finish = () => { if (!settled) { settled = true; if (done) done(); } };
+  try {
+    const pid = child && child.pid;
+    if (!pid || child.exitCode !== null || child.signalCode) { finish(); return; }
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      killer.once("exit", finish);
+      killer.once("error", finish);
+      setTimeout(finish, 5000).unref(); // never hang the flow on taskkill
+    } else {
+      child.once("close", finish);
+      child.kill("SIGKILL");
+      setTimeout(finish, 3000).unref();
+    }
+  } catch { finish(); }
+}
+
+/**
+ * Headless boot check for a freshly installed core: spawn it exactly like
+ * doSpawn does (same runtime, --expose-internals, launcher-flag ordering) on
+ * a scratch port and a THROWAWAY home, and wait until it serves HTTP <400,
+ * exits, or the deadline passes. The throwaway home is deliberate: the failure
+ * class this guards (tree-internal import errors — the 2026-09-04 mixed-version
+ * incident) reproduces on a fresh profile, while letting the NEW core boot the
+ * REAL profile would migrate it forward and poison the very rollback this
+ * smoke feeds. Passes when the core serves HTTP before the deadline; any
+ * earlier exit or the deadline itself is a failure. The probe child is fully
+ * isolated from shell state (no dshProc / spawnSerial / logTail / watchdog)
+ * and is killed and given time to release its files before cb fires.
+ * cb({ ok, detail }) — detail is a short output tail for panels/notifications.
+ */
+function smokeBootDSH(cb) {
+  const found = resolveDSHBin();
+  if (!found) { cb({ ok: false, detail: "更新后找不到 DSH 安装" }); return; }
+  const runtime = dshRuntime();
+  if (!runtimeSupportsDsh(runtime)) {
+    cb({ ok: false, detail: `运行时版本过低（Node ${process.versions.node}，核心要求 ≥22.15）` });
+    return;
+  }
+  const smokeHome = path.join(app.getPath("userData"), "smoke-home-" + Date.now());
+  try { fs.mkdirSync(smokeHome, { recursive: true }); } catch { /* ignore */ }
+  // Scratch port: take a free one from the OS and release it immediately.
+  const scratch = net.createServer();
+  scratch.once("error", () => cb({ ok: false, detail: "无可用临时端口" }));
+  scratch.once("listening", () => {
+    const port = scratch.address().port;
+    scratch.close(() => runSmoke(port));
+  });
+  scratch.listen(0, "127.0.0.1");
+
+  function runSmoke(port) {
+    const { bin, base } = found;
+    const noOpenArgs = supportsNoOpen(base) ? ["--no-open"] : [];
+    const args = ["--expose-internals", bin, "--profile", "web", "--port", String(port), ...noOpenArgs];
+    const env = childEnv();
+    if (runtime.runAsNode) env.ELECTRON_RUN_AS_NODE = "1";
+    // The port comes from argv; a shell-level DSH_DESKTOP_PORT (dev isolation
+    // or a user's global env) must not reach the core — measured in the e2e
+    // update run: the smoke child honored the inherited env port while the
+    // probe watched the argv port, reading as a 90s "timeout".
+    delete env.DSH_DESKTOP_PORT;
+    env.DSH_HOME = smokeHome;
+    log(`smoke boot: ${runtime.command} ${args.join(" ")} (throwaway home)`);
+    const child = spawn(runtime.command, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const lines = [];
+    let buffer = "";
+    let printedUrl = null;
+    let settled = false;
+    const finish = (ok, why) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      killTree(child, () => {
+        // The tree is dead — drop the throwaway home and let handles settle.
+        fs.rm(smokeHome, { recursive: true, force: true }, () => { /* best effort */ });
+        setTimeout(() => {
+          log(`smoke boot ${ok ? "PASSED" : "FAILED"}${why ? ` — ${why}` : ""}`);
+          if (!ok && lines.length) log(`smoke boot output tail:\n${lines.slice(-15).join("\n")}`);
+          const detail = ((why ? why + "\n" : "") + lines.slice(-12).join("\n")).slice(-1500);
+          cb({ ok, detail });
+        }, 500);
+      });
+    };
+    const timer = setTimeout(() => {
+      finish(false, `冒烟启动超时（${Math.round(SMOKE_BOOT_TIMEOUT_MS / 1000)}s 内未在临时端口上就绪）`);
+    }, SMOKE_BOOT_TIMEOUT_MS);
+    const feed = (chunk) => {
+      buffer += chunk.toString();
+      let idx;
+      while ((idx = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        lines.push(line);
+        // Core ≥0.1.2-rc.1 gates the web server on an auth token: the URL it
+        // prints carries `?token=…`, and a token-less GET / no longer answers
+        // <400 — probing the bare port therefore reads as "never ready" even
+        // though the core is up (measured in the update e2e). Poll the URL the
+        // core itself printed, exactly like handleLine feeds the real flow.
+        const u = extractDshUrl(line);
+        if (u && u.includes(`:${port}`)) printedUrl = u;
+      }
+    };
+    child.stdout.on("data", feed);
+    child.stderr.on("data", feed);
+    child.on("error", (err) => finish(false, `冒烟启动进程错误：${err.message}`));
+    child.on("exit", (code) => finish(false, `更新后的核心在启动阶段即退出（code=${code ?? "null"}）`));
+    // Success signal = HTTP ready on the scratch port, polled at the URL the
+    // core printed (token included — see feed()). The deadline timer above is
+    // the backstop; settled makes whichever fires first win.
+    const bareUrl = `http://127.0.0.1:${port}`;
+    const deadline = Date.now() + SMOKE_BOOT_TIMEOUT_MS;
+    const poll = () => {
+      if (settled) return;
+      const req = http.get(printedUrl || bareUrl, (res) => {
+        res.resume();
+        if (res.statusCode !== undefined && res.statusCode < 400) finish(true, "");
+        else pollLater();
+      });
+      req.setTimeout(2500, () => { req.destroy(); pollLater(); });
+      req.on("error", pollLater);
+    };
+    const pollLater = () => {
+      if (!settled && Date.now() < deadline) setTimeout(poll, 500);
+    };
+    poll();
+  }
+}
+
 function updateDSH(cb) {
   if (installInProgress) { cb(false); return; }
   installInProgress = true;
@@ -2292,6 +2617,11 @@ function updateDSH(cb) {
     dshUrl = null;
     clearWatchdog();
     loadSplashPage();
+    const prevVersion = readInstalledVersion();
+    // Park the working tree FIRST: the update then installs into a fresh
+    // directory and the old version stays one rename away no matter what the
+    // installer or the new tree does (see parkManagedDirForUpdate).
+    updateParkedTree = parkManagedDirForUpdate();
     sendStatus("正在检测可用的 npm 镜像源…");
     // Probe the registries first (like the first-install path) so the update
     // does not silently hang on an unreachable registry/CDN.
@@ -2301,19 +2631,49 @@ function updateDSH(cb) {
       sendStatus("正在下载最新版 DSH…");
       installWithRetry((result) => {
         installInProgress = false;
-        isUpdating = false;
-        if (!result) return; // quit path
+        if (!result) { isUpdating = false; return; } // quit path (park, if any, is cleaned up by the next update)
         if (result.ok) {
-          log("latest DSH installed");
-          latestKnown = readInstalledVersion();
-          pushUpdateState();
-          if (Notification.isSupported()) {
-            new Notification({ title: "更新完成", body: `DSH 已更新到 ${latestKnown ?? "最新版"}，正在重启核心…` }).show();
-          }
-          restartDSH();
-          cb(true);
+          sendStatus("正在验证新版本能否启动…");
+          smokeBootDSH((smoke) => {
+            isUpdating = false;
+            updateParkedTree = false;
+            if (smoke.ok) {
+              log("latest DSH installed (smoke boot passed)");
+              latestKnown = readInstalledVersion();
+              pushUpdateState();
+              discardParkedManagedDir();
+              if (Notification.isSupported()) {
+                new Notification({ title: "更新完成", body: `DSH 已更新到 ${latestKnown ?? "最新版"}，正在重启核心…` }).show();
+              }
+              restartDSH();
+              cb(true);
+            } else if (restoreParkedManagedDir()) {
+              // The new tree cannot boot — swap the last known-good one back
+              // in. The shell keeps working on the old version; the failure
+              // detail rides the notification and the persistent main log.
+              log("update: new version failed smoke boot — rolled back to previous install");
+              if (Notification.isSupported()) {
+                new Notification({
+                  title: "更新已自动回滚",
+                  body: `新版本启动验证失败，已恢复到 ${prevVersion ?? "上一版本"}，不影响使用。详情见主日志。`
+                }).show();
+              }
+              sendStatus("新版本启动验证失败，已自动回滚，正在用原版本重启…");
+              restartDSH();
+              cb(false);
+            } else {
+              // Nothing to roll back to (first install / park failed): let the
+              // regular spawn path surface the failure with its full UX.
+              sendStatus("新版本验证未通过，正在尝试启动…");
+              restartDSH();
+              cb(false);
+            }
+          });
         } else {
           // install failed and the user chose to keep the current version
+          if (updateParkedTree) restoreParkedManagedDir();
+          updateParkedTree = false;
+          isUpdating = false;
           sendStatus("已取消更新，正在用当前版本重启…");
           restartDSH();
           cb(false);

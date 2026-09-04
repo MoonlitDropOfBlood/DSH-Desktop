@@ -141,6 +141,7 @@ window.__ModuleLoader__.load({
   - **测试**：`scripts/test-plugin-recovery.js`（内嵌真实日志摘录的单测 + 对 `.testdata/` 全量样本的回归）；`scripts/e2e-plugin-recovery.js` 全链路 e2e（隔离环境预置两个坏插件 → 自动卸载 → 重启成功 → 面板日志标记）。
 - **用户已自行安装时绝不重复挂载**（大坑）：Cordis 的 `- insert:` 是**无条件追加**（源码见 `dsh-app-boot` 的 `applyEntryPatches`），同 id 再插一行会把插件**挂载两次**（服务/UI 全重复）。所以挂载前先检测 profile 是否已挂载 dshmarket：`profiles/web/package.json` 的 `dsh.profile.bundles` 含 `"dshmarket"`，或 `cordis.patch.yml` 文本含 `dshmarket`——命中则**不暂存、不 insert**，只追加上一条所述的 `allowRestart: false` 覆盖行（普通 `- id:` 行作用于已有条目，不会新增；用户手写行若换了 id，覆盖行找不到目标、loader 只警告跳过，无害）。此检测**先于** `bundleMarket` 开关——开关只管壳暂存的拷贝，生命周期保护不因开关关闭而缺席。
 - **开关**：设置"内置插件市场"（`bundleMarket`，默认开，存 `update-settings.json`）关掉后不再暂存/挂载——用户在 profile 里卸载市场后靠它避免壳自动装回。改动**重启 DSH 生效**（patch 每次 spawn 才重组装）。
+- **核心 ≥0.1.2 会自动挂载 profile node_modules 里的包（大坑，2026-09-04 e2e 实测）**：壳暂存的 dshmarket 拷贝会被新核心自己mount成 loader 条目，此时 patch 里的 `- insert:` 行就成了第二条 → `duplicate loader entry id: dsh-market` 启动崩。所以 `prepareBundledMarket()` 在 `coreAutoMountsProfilePackages()`（装到的核心 ≥0.1.2）时返回 `"staged-auto"`，`prepareDesktopPlugin()` 照 `"user"` 模式发**覆盖行**（`- id:` 找到核心自动建的条目改 config，正好把 `allowRestart: false` 附上）；0.1.1.x 不自动挂载，维持 `- insert:`。**别把这个版本门禁合并成无条件覆盖行**——0.1.1.x 上自动挂载不存在，覆盖行找不到目标只会静默跳过，市场就消失了。
 - profile 的 node_modules 可能被 pnpm 管理，pnpm prune 会清掉壳暂存的"外来"拷贝——无妨，下次 spawn DSH 会重新暂存（自愈）。
 
 ### 3. Electron ↔ DSH 通信（三条通道）
@@ -216,8 +217,24 @@ window.__ModuleLoader__.load({
 
 - **更新会崩的根因**：安装器直接覆盖**正在运行**的 DSH 目录（`<userData>/dsh/node_modules/@deepseek-ai/dsh`）。Windows 下运行中进程文件被替换 → EPERM/EBUSY，安装报错且 DSH 进程被删文件而崩。
 - **修复**：`updateDSH()` 先 `killDSH()` 停掉核心 → 回 splash → 安装（带进度条）→ `restartDSH()` 起新版本。失败时 `resolveDSHBin()` 回退旧版本/缓存，不会留死状态。**更新只重启核心，不需要重启整个 Electron 壳**。
-- 安装失败操作（重试 / 换镜像重试 / **用当前版本继续**（有旧版时）/ 退出）都在页面错误面板里，`pendingInstallCb` 保存续作回调。
+- 安装失败操作（重试 / 换镜像重试 / **用当前版本继续**（有旧版时）/ 退出）都在页面错误面板里，`pendingInstallCb` 保存续作回调。更新期间受管目录被 park 到 `dsh.prev`（见下），`updateParkedTree` 标志保证「用当前版本继续」按钮不消失。
 - 若更新过程仍异常，`dsh:installUpdate` 有 try/catch、主进程有全局 `uncaughtException`/`unhandledRejection` 兜底，都会把错误打到页面面板（可复制）而不是系统弹窗。
+
+#### 9b. 更新三重防线（2026-09-04 事故后加，"点了更新就打不开"绝不能再发生）
+
+事故：0.1.1-rc.2 → 0.1.2-rc.1 更新后核心秒崩。根因是 **pnpm 在存量目录上跨版本线更新时，peer 解析复用了树上的旧实例**——旧 lockfile 把 `dsh-subagent@0.1.2-rc.1` 的 peer `@deepseek-ai/dsh-attachment: ^0.1.2-rc.1` 解析成了残存的 0.1.1-rc.2（冻在旧 lockfile 里），新代码 import 旧包没有的导出 → ESM 链接期 SyntaxError → 整批核心包加载失败。全新目录 pnpm/npm 都不复现；npm 修复了 peer 解析成本（见 9d）但 pnpm 仍是默认。三道防线（`updateDSH()` → `parkManagedDirForUpdate` → `installWithRetry` → `smokeBootDSH` → 提交/回滚）：
+
+- **① park（回滚锚）**：安装前把现役树整体 `renameSync` 成 `dsh.prev`（同卷元数据操作，瞬间完成），新树装进全新目录——既消除"存量状态"这个事故诱因，又让回滚变成一次 rename（零网络、零重装、离线可用）。rename 失败（AV 握着句柄）就降级为原地安装并记日志。**回滚绝不能"先 rmSync 目标再 rename"**：Windows 的删除是延迟生效的（delete-pending，AV 握着 share-delete 句柄时名字滞留命名空间），rm 成功后紧跟的 rename 会连续 EPERM（e2e 实测 3/3 失败），之后 `existsSync` 又为 true，壳会把核心 spawn 到一棵已被掏空的树上。`restoreParkedManagedDir()` 必须用"换名"策略：坏树 rename 到 `dsh.broken-<ts>`、旧树 rename 进来、坏树异步删，带 3 次退避重试。
+- **② 冒烟启动（`smokeBootDSH`）**：提交前用同款运行时（`--expose-internals`、launcher 参数序）在随机临时端口上无头启动新核心，HTTP <400 即通过（30s 内），提前退出/超时即失败——树内版本错位这类故障在 import 阶段几秒内就死，远比重启进坏树便宜。三个必须：**一次性 home**（`env.DSH_HOME = userData/smoke-home-<ts>`，用完即删——让新核心启动真实 profile 会把它迁移到新版本格式，回滚后旧核心读不了；事故分类里的失败在全新 profile 上照样复现，冒烟不损失覆盖面）；**剥掉 `env.DSH_DESKTOP_PORT`**（冒烟端口来自 argv，壳级 env 会把核心引去真实端口、探针却盯着 argv 端口，表现为 90s 超时——e2e 实测）；**探针必须用核心自己打印的带 token URL**（`extractDshUrl(line)`，rc.1 起裸 `GET /` 不再 <400，探裸端口会永远"未就绪"）。失败时把子进程输出尾巴写进主日志（唯一现场证据）。
+- **③ 失败自动回滚**：冒烟失败 → restore（见①）→ 通知「更新已自动回滚，已恢复到 <旧版>」→ 重启旧版，用户无感继续用；无处可回滚（首次安装/park 失败）才走原错误面板。**killTree 后必须等进程死透（taskkill 完成回调 + 500ms settle）再做文件手术**，taskkill 是异步的。
+
+#### 9c. 安装器选择（pnpm / npm 自动切换）
+
+`installPlan()` 按目标版本线选安装器：**目标（`latestKnown`，渠道 tag 的解析结果）≥0.1.2 → npm，否则 pnpm**；`DSH_DESKTOP_INSTALLER=npm|pnpm` 强制覆盖；PATH 上没有 npm（裸机）→ 永远 pnpm。依据：0.1.2 优化了发布包的 peer dependency 图，npm arborist 从 0.1.1 时代的 >10 分钟解析爆炸（实测放弃）变成 23.7s 全新安装（实测 2026-09-04，npm 11.17 + npmmirror），且 npm 对 peer 按区间独立解析最高满足版本，**结构上不会复现 pnpm 的旧实例复用偏斜**（9b 事故根因）。npm 不随壳分发（走用户 PATH / `DSH_DESKTOP_NPM`），所以 `npmOnPath()` 探测失败就回落 pnpm。npm 安装前若发现 pnpm 时代的 `node_modules/.modules.yaml` 会先清掉（符号农场对 npm 是异物；镜像 `prepareManagedDir` 的反向策略）。更新流程永远先 park 再安装，所以 npm 实际总是面对空目录，pnpm→npm 迁移零风险。
+
+#### 9d. pnpm lockfile 是负资产（勿删此逻辑）
+
+`prepareManagedDir()` 每次都删 `pnpm-lock.yaml`。壳只跑 `pnpm add <spec>`（每次全树重解析），lockfile 没有任何收益，却携带上一版本线的快照供 peer 解析器复用——9b 事故的直接载体。**加新逻辑时不要"优化"掉这行删除**。
 
 ### 10. 单实例（双击图标防双开）
 
@@ -309,4 +326,6 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_NPM` | 覆盖 npm 回退路径要 spawn 的 npm 可执行文件绝对路径（仅 pnpm 缺失的回退时用） |
 | `DSH_DESKTOP_MARKET_VERSION` | `scripts/fetch-market-plugin.js` 下载的 dshmarket 版本（默认 1.15.0） |
 | `DSH_DESKTOP_PNPM_VERSION` | `scripts/fetch-pnpm.js` 下载的内置 pnpm 版本（默认 10.33.0） |
+| `DSH_DESKTOP_INSTALLER` | 强制核心安装器：`npm` / `pnpm`（默认自动：更新目标 ≥0.1.2 用 npm，其余 pnpm；见"9c. 安装器选择"） |
+| `DSH_DESKTOP_SMOKE_SECONDS` | 更新冒烟启动的判定秒数（默认 90s；生产绝不设置，e2e 用极小值强制冒烟失败验证回滚） |
 | `DSH_DESKTOP_E2E_RESTARTS` | e2e 回归钩子：`"N[,ms]"` 让应用每次打开 DSH 页后自动执行 N 次真实重启链（生产绝不设置；配合 USER_DATA/HOME/PORT 全隔离用） |

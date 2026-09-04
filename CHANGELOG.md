@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-09-04
+
+### 修复
+
+- **核心更新到 0.1.2-rc.1 后无法启动（pnpm 跨版本线更新的 peer 版本错位）**：在存量目录上 `pnpm add` 跨版本线（0.1.1-rc.2 → 0.1.2-rc.1）时，pnpm 的 peer 解析会复用树上的旧实例——旧 lockfile 把 `dsh-subagent@0.1.2-rc.1` 的 peer `@deepseek-ai/dsh-attachment: ^0.1.2-rc.1` 解析成残存的 0.1.1-rc.2（实测冻在旧 lockfile 里），新代码 import 旧包没有的导出（`admitPromptContent`）→ ESM 链接期 SyntaxError，`llm-deepseek`/`session-controller`/`better-sidebar` 整批加载失败、核心秒崩。全新目录安装不复现（pnpm/npm 均正常）。修复：`prepareManagedDir()` 每次安装前删除 `pnpm-lock.yaml`——壳只跑 `pnpm add`（每次本就全树重解析），lockfile 零收益、纯事故载体。
+- **核心 ≥0.1.2 时内置市场重复挂载，启动即崩（`duplicate loader entry id: dsh-market`）**：0.1.2 起核心会把 profile node_modules 里的包自动挂载为 loader 条目，壳暂存市场后再 `- insert:` 就成了第二条。修复：装到的核心 ≥0.1.2 时（`coreAutoMountsProfilePackages()`）patch 改发**覆盖行**（`- id:`，顺带把 `allowRestart: false` 附上）；0.1.1.x 不自动挂载，维持 `- insert:`（版本门禁，勿合并成无条件覆盖）。
+- **更新冒烟探针误报超时**：核心 ≥0.1.2-rc.1 起裸 `GET /` 不再返回 <400，更新冒烟启动的探针改为轮询核心自己打印的带 token URL（`extractDshUrl`），并把冒烟子进程 env 里的 `DSH_DESKTOP_PORT` 剥掉（否则核心按 env 绑真实端口、探针却盯着 argv 端口，表现为 90s 假超时）。
+
+### 新增
+
+- **更新三重防线，「点了更新打不开」绝不再发生**：① **park**——安装前把现役树 rename 成 `dsh.prev`，新树装进全新目录（同时消除存量状态诱因），回滚 = 一次 rename，零网络；② **冒烟启动**——提交前在临时端口 + 一次性 home 上无头启动新核心验证（HTTP <400 即通过），树内版本错位这类故障 import 阶段几秒内暴露，失败输出自动落主日志；③ **失败自动回滚**——冒烟失败把旧版**换名**救回并通知用户，无感继续用旧版。注意 Windows delete-pending 陷阱：回滚绝不能"先 rmSync 目标再 rename"（实测 3/3 EPERM，之后核心被 spawn 到被掏空的树上），必须换名策略 + 退避重试。冒烟判定秒数可用 `DSH_DESKTOP_SMOKE_SECONDS` 覆盖。
+- **安装器自动切换（npm / pnpm）**：更新目标 ≥0.1.2 → 自动用 **npm**（该版本线优化了发布包 peer 图，实测全新安装 23.7s，对比 0.1.1 时代 >10min 解析爆炸；npm 对 peer 按区间独立解析，结构上不会复现 pnpm 偏斜），其余场景仍 pnpm（内置、裸机可用）；`DSH_DESKTOP_INSTALLER=npm|pnpm` 可强制覆盖；npm 安装前自动清掉 pnpm 时代的符号农场目录。
+
 ## [1.6.0] - 2026-09-04
 
 ### 修复
