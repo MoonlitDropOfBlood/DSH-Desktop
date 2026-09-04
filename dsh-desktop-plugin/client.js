@@ -38,7 +38,25 @@ window.__ModuleLoader__.load({
 		const Button = ui.Button;
 		const Toast = ui.Toast;
 
-		const WINDOW_ICONS = { minimize: "–", toggleMaximize: "□", close: "✕" };
+		// Window-button glyphs as inline SVG (Lucide geometry): one shared
+		// 24-unit viewBox rendered at 12px with a 2-unit round stroke, so all
+		// three glyphs share an identical optical size and stroke weight. The
+		// previous text glyphs (– □ ✕) came from three different fonts and
+		// rendered with mismatched sizes / optical weights.
+		const WINDOW_ICONS = {
+			minimize: ["M5 12h14"],
+			toggleMaximize: ["M6 6h12v12H6z"],
+			close: ["M6 6l12 12M18 6 6 18"]
+		};
+		function WindowIcon(props) {
+			return React.createElement("svg", {
+				width: 12, height: 12, viewBox: "0 0 24 24", fill: "none",
+				stroke: "currentColor", strokeWidth: 2,
+				strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true
+			},
+				WINDOW_ICONS[props.kind].map((d, i) => React.createElement("path", { key: i, d }))
+			);
+		}
 
 		function bridge() {
 			return (typeof window !== "undefined" && window.dshDesktop) ? window.dshDesktop : null;
@@ -113,7 +131,7 @@ window.__ModuleLoader__.load({
 						if (hasBridge("windowControl")) bridge().windowControl(props.kind);
 					}
 				},
-				WINDOW_ICONS[props.kind]
+				React.createElement(WindowIcon, { kind: props.kind })
 			);
 		}
 
@@ -657,9 +675,9 @@ window.__ModuleLoader__.load({
 }
 .dsh-desktop-controls .dsh-desktop-btn {
   -webkit-app-region: no-drag; pointer-events: auto; width: 44px;
-  box-sizing: border-box; height: 22px; margin: 9px 0 5px 0;
+  box-sizing: border-box; height: 100%; margin: 0; padding: 0;
   border: none; background: transparent;
-  color: var(--dsw-alias-label-secondary, #61666b); font-size: 14px; line-height: 1;
+  color: var(--dsw-alias-label-secondary, #61666b);
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer; transition: background 0.12s, color 0.12s;
 }
@@ -673,13 +691,13 @@ window.__ModuleLoader__.load({
    A compact labeled capsule that reads like the original DSH button and uses
    the same theme tokens as dsh-session-log-export's HeaderAction
    (label-primary text, border-l2 outline, interactive-bg-hover on hover), so
-   it tracks the light/dark theme. All the controls (capsule + window buttons)
-   are inset 9px from the top of the strip so they don't hug the window's top
-   edge. */
+   it tracks the light/dark theme. The capsule keeps its 22px pill height and
+   is vertically centered in the strip; the window buttons are full-height and
+   flush with the window top (like a native frameless title bar). */
 .dsh-desktop-controls .dsh-desktop-sessionlog {
-  -webkit-app-region: no-drag; pointer-events: auto;
+  -webkit-app-region: no-drag; pointer-events: auto; align-self: center;
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  box-sizing: border-box; height: 22px; margin: 9px 10px 5px 12px; padding: 0 10px;
+  box-sizing: border-box; height: 22px; margin: 0 10px 0 12px; padding: 0 10px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
   border-radius: 13px; background: transparent;
   color: var(--dsw-alias-label-primary, #0f1115);

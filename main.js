@@ -536,7 +536,7 @@ function ensureFallbackControls() {
         '.dsh-desktop-fallback{position:fixed;top:0;left:0;right:0;height:36px;display:flex;align-items:stretch;justify-content:flex-end;z-index:2147483000;user-select:none;pointer-events:none}',
         '.dsh-desktop-fallback .dsh-desktop-fallback-drag{position:absolute;top:0;left:0;right:132px;height:12px;-webkit-app-region:drag;pointer-events:auto}',
         '.dsh-desktop-fallback .dsh-desktop-fallback-drag-side{position:absolute;top:0;right:100%;width:0;height:12px;-webkit-app-region:drag;pointer-events:auto}',
-        '.dsh-desktop-fallback .fb{width:44px;box-sizing:border-box;height:22px;margin:9px 0 5px 0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dsw-alias-label-secondary,#61666b);font-size:14px;border:none;background:transparent;-webkit-app-region:no-drag;pointer-events:auto}',
+        '.dsh-desktop-fallback .fb{width:44px;box-sizing:border-box;height:100%;margin:0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dsw-alias-label-secondary,#61666b);border:none;background:transparent;-webkit-app-region:no-drag;pointer-events:auto}',
         '.dsh-desktop-fallback .fb:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,0.06));color:var(--dsw-alias-label-primary,#0f1115)}',
         '.dsh-desktop-fallback .fb-close:hover{background:#e81123;color:#fff}',
         // Hide the DSH header's Session log button so the strip never covers it
@@ -547,12 +547,17 @@ function ensureFallbackControls() {
       document.head.appendChild(css);
       var strip = document.createElement('div');
       strip.className = 'dsh-desktop-fallback';
+      // Same Lucide-style glyphs as the plugin's WindowIcon (12px, 2-unit
+      // round stroke on a 24-unit viewBox) so both strips look identical.
+      var fbIcon = function (d) {
+        return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + d + '"/></svg>';
+      };
       strip.innerHTML =
         '<div class="dsh-desktop-fallback-drag-side"></div>' +
         '<div class="dsh-desktop-fallback-drag"></div>' +
-        '<button class="fb" data-a="minimize" title="最小化">\u2013</button>' +
-        '<button class="fb" data-a="toggleMaximize" title="最大化/还原">\u25A1</button>' +
-        '<button class="fb fb-close" data-a="close" title="关闭">\u2715</button>';
+        '<button class="fb" data-a="minimize" title="最小化">' + fbIcon('M5 12h14') + '</button>' +
+        '<button class="fb" data-a="toggleMaximize" title="最大化/还原">' + fbIcon('M6 6h12v12H6z') + '</button>' +
+        '<button class="fb fb-close" data-a="close" title="关闭">' + fbIcon('M6 6l12 12M18 6 6 18') + '</button>';
       strip.addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('.fb') : null;
         if (el && window.dshDesktop && window.dshDesktop.windowControl) {
