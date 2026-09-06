@@ -18,8 +18,12 @@
  *      come from DSH theme tokens, so the controls track the light/dark theme.
  *   2. A settings section ("核心") showing the installed core version, an
  *      update-channel selector (稳定版=latest / 体验版=next / 实验版=alpha),
- *      a "check for updates" button, and an auto-update toggle. Feedback is
- *      shown via a Toast ("已是最新版本" / "发现新版本 …").
+ *      a "check for updates" button, an auto-update toggle, and a 重启核心
+ *      button (same restart chain as Ctrl/Cmd+Alt+R). It also spells out the
+ *      two shell shortcuts (Ctrl/⌘ R 刷新页面 · Ctrl/⌘ Alt/⌥ R 重启核心) —
+ *      the frameless window has NO visible menu bar on Windows, so this page
+ *      (and the tray menu) is the only place users can discover them.
+ *      Feedback is shown via a Toast ("已是最新版本" / "发现新版本 …").
  *   3. A green "update available" badge in the sidebar foot
  *      (`sidebar.footer.action`), shown when a newer core exists and
  *      auto-update is off; hidden while the sidebar is collapsed (rail).
@@ -386,17 +390,26 @@ window.__ModuleLoader__.load({
 				"（在浏览器中运行，未检测到桌面外壳）");
 		}
 
-		/** 核心: core version + update channel + update check + auto-update toggle. */
+		/** 核心: core version + update channel + update check + auto-update toggle
+		 *  + a 重启核心 button, plus the shell-shortcut hint (Ctrl/⌘ R refresh,
+		 *  Ctrl/⌘ Alt/⌥ R restart core) — on Windows the app menu is invisible,
+		 *  so the settings page is where users learn those keys exist. */
 		const CORE_CHANNELS = [
 			{ value: "latest", label: "稳定版（latest）" },
 			{ value: "next", label: "体验版（next）" },
 			{ value: "alpha", label: "实验版（alpha）" }
 		];
 		const CHANNEL_LABEL = { latest: "稳定版", next: "体验版", alpha: "实验版" };
+		// Shell shortcuts, spelled per platform: macOS shows them in its always
+		// visible menu bar; Windows' frameless window hides the menu entirely.
+		const SHORTCUT_HINT = /Mac/i.test(typeof navigator !== "undefined" && (navigator.userAgent || ""))
+			? "快捷键：⌘ R 刷新页面；⌘ ⌥ R 重启核心"
+			: "快捷键：Ctrl+R 刷新页面；Ctrl+Alt+R 重启核心";
 		function CoreSection() {
 			const state = useUpdateState();
 			const [checking, setChecking] = React.useState(false);
 			const [installing, setInstalling] = React.useState(false);
+			const [restarting, setRestarting] = React.useState(false);
 			const [toast, setToast] = React.useState(null);
 			if (!hasBridge("getUpdateState")) return React.createElement(NoShell);
 			const installed = state ? state.installed : null;
@@ -425,6 +438,25 @@ window.__ModuleLoader__.load({
 					.finally(() => setInstalling(false));
 			};
 			const toggleAuto = () => { bridge().setAutoUpdate(!autoUpdate); };
+			// Restart the DSH core only (shell stays up): the window goes back to
+			// the splash page mid-restart, so this component unmounts anyway —
+			// the flag just stops a double click in the meantime. The promise
+			// resolves to whether the restart actually started.
+			const doRestart = () => {
+				setRestarting(true);
+				Promise.resolve(bridge().restartCore())
+					.then((started) => {
+						if (started) showToast("正在重启核心…");
+						else {
+							setRestarting(false);
+							showToast("核心正在更新或已在重启中，请稍后再试");
+						}
+					})
+					.catch(() => {
+						setRestarting(false);
+						showToast("重启失败，请重试");
+					});
+			};
 
 			return React.createElement(
 				"div",
@@ -461,7 +493,20 @@ window.__ModuleLoader__.load({
 						? React.createElement(Button, {
 							variant: "solid", size: "sm", disabled: installing, onClick: doInstall
 						}, installing ? "更新中…" : `更新到 ${latest}`)
-						: null)
+						: null),
+				hasBridge("restartCore")
+					? React.createElement("div", { className: "dsh-desktop-row" },
+						React.createElement("span", { className: "dsh-desktop-label" }, "重启核心"),
+						React.createElement(Button, {
+							variant: "outline", size: "sm", disabled: restarting, onClick: doRestart
+						}, restarting ? "重启中…" : "重启核心"))
+					: null,
+				hasBridge("restartCore")
+					? React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
+						"停止并重新拉起 DSH 核心进程（窗口会短暂回到启动页）；更新渠道等改动借此生效。")
+					: null,
+				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
+					SHORTCUT_HINT)
 			);
 		}
 
@@ -736,6 +781,11 @@ window.__ModuleLoader__.load({
 .dsh-desktop-new { color: #22c55e; font-weight: 600; }
 .dsh-desktop-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .dsh-desktop-hint { color: var(--dsw-alias-label-caption); font-size: 12px; line-height: 18px; }
+/* A hint living INSIDE a row (e.g. the channel select's note) takes the
+   remaining width and wraps within itself instead of squeezing its siblings
+   (a long inline hint once pushed the restart button onto its own line).
+   Standalone hint rows carry both classes on ONE element and never match. */
+.dsh-desktop-row > .dsh-desktop-hint { flex: 1 1 auto; min-width: 0; }
 /* Sub-header grouping the schema-driven plugin settings area (phase 2). */
 .dsh-desktop-subhead { margin-top: 6px; color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; }
 .dsh-desktop-actions { gap: 8px; }

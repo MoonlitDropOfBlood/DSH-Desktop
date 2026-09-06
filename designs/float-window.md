@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | frame / titleBar | 无 | 悬浮件标配 |
 | transparent | 可选，默认 `true` | 宠物需要异形轮廓 |
-| alwaysOnTop | 固定 `true`（level `floating`） | 浮在桌面上；不追「screen-saver」级，避免压住全屏应用的状态条生态位争议 |
+| alwaysOnTop | 固定 `true`（level `floating`） | 浮在桌面上；不追「screen-saver」级，避免压住全屏应用的状态条生态位争议。**Windows 坑**：永不激活的 `NOACTIVATE` 置顶窗会被系统降级进普通 z 带（`WS_EX_TOPMOST` 样式位还在，但 z-order 落到普通窗口之下，任何窗口都能盖住它）——主进程有 2.5s 看门狗对每个浮窗重复 `setAlwaysOnTop(true, "floating")` 重新断言（Electron 每次调用都会重发 `SetWindowPos(HWND_TOPMOST)`），勿删 |
 | focusable / activatable | 固定 `false` | 永不抢焦点（Windows `showInactive`；mac 对应非激活 NSPanel） |
 | skipTaskbar | 固定 `true` | 不占任务栏（macOS 同步不进 Dock） |
 | resizable | 固定 `false` | 尺寸只经 create/move 定 |

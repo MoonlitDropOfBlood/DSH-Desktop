@@ -2047,7 +2047,11 @@ function attemptPluginRecovery(freshTail) {
 function restartDSH() {
   // isUpdating: an install in progress ends with its OWN restartDSH() — a
   // manual Ctrl+Alt+R here would kill the mid-install state and its splash.
-  if (restartRequested || isUpdating) return;
+  // installInProgress (first install / update download): respawning now could
+  // resolve a half-written tree — a manual restart stays a no-op until done.
+  // Returns whether a restart actually STARTED (the tray item / settings-page
+  // button use it for feedback; older callers ignore the return value).
+  if (restartRequested || isUpdating || installInProgress) return false;
   restartRequested = true;
   log("restarting DSH…");
   emitShellEvent("core.lifecycle", { state: "restarting" });
@@ -2064,6 +2068,7 @@ function restartDSH() {
     }
     startDSH();
   });
+  return true;
 }
 
 function showFatal(message) {
@@ -2491,6 +2496,23 @@ function closeAllFloatWindows() {
   for (const id of [...floatWindows.keys()]) destroyFloatWindow(id);
 }
 
+/** Re-assert HWND_TOPMOST for every live float window.
+ * Windows demotes never-activated NOACTIVATE topmost windows into the normal
+ * z-band while KEEPING the WS_EX_TOPMOST style bit (observed live: pet window
+ * listed below ordinary windows in the z-order chain, so any window could
+ * cover it). Electron's setAlwaysOnTop re-issues SetWindowPos(HWND_TOPMOST)
+ * on every call, so a slow watchdog climbs the window back into the topmost
+ * band. */
+const floatTopmostWatchdog = setInterval(() => {
+  if (!floatWindows.size) return;
+  for (const entry of floatWindows.values()) {
+    try {
+      if (!entry.win.isDestroyed()) entry.win.setAlwaysOnTop(true, "floating");
+    } catch { /* gone */ }
+  }
+}, 2500);
+if (floatTopmostWatchdog.unref) floatTopmostWatchdog.unref();
+
 /** Clamp a window's top-left into the nearest display's work area. */
 function clampFloatPoint(x, y, width, height) {
   let best = null, bestDist = Infinity;
@@ -2917,7 +2939,16 @@ function ensureTray() {
 function rebuildTrayMenu() {
   if (!tray) return;
   const template = [
-    { label: "打开 DeepSeek Harness", click: () => showMainWindow() }
+    { label: "打开 DeepSeek Harness", click: () => showMainWindow() },
+    {
+      // Same restart chain as the app-menu Ctrl+Alt+R. The accelerator is
+      // DISPLAY-ONLY in tray context menus (the working registration lives in
+      // the app menu) — but Windows users have no visible menu bar at all, so
+      // spelling the shortcut here is how they ever discover it.
+      label: "重启核心",
+      accelerator: "CommandOrControl+Alt+R",
+      click: () => { showMainWindow(); restartDSH(); }
+    }
   ];
   for (const [plugin, items] of trayContribs) {
     if (!items.length) continue;
@@ -3512,6 +3543,11 @@ ipcMain.handle("dsh:restartApp", () => {
   relaunchApp();
   return true;
 });
+// Restart ONLY the DSH core (kill + respawn; the shell keeps running) — the
+// settings page's 重启核心 button. Same chain as the Ctrl+Alt+R menu item and
+// the tray entry. The boolean tells the button whether a restart actually
+// started (false while already restarting / updating / installing).
+ipcMain.handle("dsh:restartCore", () => restartDSH());
 
 // ---- phase-2 extension IPC (client plugins, via window.dshDesktop) ---------
 // Same implementations as the RPC bridge methods, so both plugin halves share

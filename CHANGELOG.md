@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-07
+
+### 新增
+
+- **托盘右键菜单内置「重启核心」**：点击先唤起主窗口（可见 splash 进度）再走 `restartDSH()` 重启链，与菜单 Ctrl+Alt+R 同一链路；菜单项展示 `Ctrl+Alt+R` 快捷键（托盘菜单 accelerator 仅展示不注册，真正的注册仍在 app 菜单）。背景：Windows 的 frameless 窗口没有可见菜单栏，用户此前无从得知重启快捷键的存在。
+- **设置页「核心」新增「重启核心」按钮 + 快捷键说明**：按钮经 `hasBridge("restartCore")` 守卫（纯浏览器不渲染），点击禁用防双击；下方整行提示说明行为（窗口短暂回到启动页、更新渠道等改动借此生效）与两个快捷键——Windows 显示 `Ctrl+R 刷新页面；Ctrl+Alt+R 重启核心`，macOS 显示 `⌘ R / ⌘ ⌥ R`（按 UA 区分）。
+- **`dshDesktop.restartCore` IPC（`dsh:restartCore`）**：只重启 DSH 核心不重启壳，与 `restartApp`（整壳重启）并列；返回布尔值表示是否真正启动，供按钮反馈。
+
+### 修复
+
+- **`restartDSH()` 新增安装期守卫**：`installInProgress`（首次安装/更新下载进行中）时手动重启静默 no-op——此前此窗口期的 Ctrl+Alt+R 可能 spawn 到半成品安装树；并改为返回是否真正启动，托盘/按钮据此提示。原有 `restartRequested`/`isUpdating` 竞态守卫不变。
+- **设置页行内长提示挤压按钮**：`.dsh-desktop-row > .dsh-desktop-hint` 改为占据剩余宽度、在自身内部折行，长提示不再把同行按钮挤到换行（重启核心行由此拆为「按钮行 + 整行提示」两行，与桌面版区既有排版一致）。
+
 ## [1.7.1] - 2026-09-05
 
 ### 变更

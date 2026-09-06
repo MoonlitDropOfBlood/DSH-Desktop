@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   setBundleMarket: (value) => ipcRenderer.invoke("dsh:setBundleMarket", value),
   installUpdate: () => ipcRenderer.invoke("dsh:installUpdate"),
   restartApp: () => ipcRenderer.invoke("dsh:restartApp"),
+  // Restart ONLY the DSH core (same chain as Ctrl/Cmd+Alt+R); resolves to true
+  // when the restart actually started (false while already restarting /
+  // updating / installing).
+  restartCore: () => ipcRenderer.invoke("dsh:restartCore"),
   // shell (desktop app) self-update via GitHub releases
   checkShellUpdate: () => ipcRenderer.invoke("dsh:checkShellUpdate"),
   downloadShellUpdate: () => ipcRenderer.invoke("dsh:downloadShellUpdate"),

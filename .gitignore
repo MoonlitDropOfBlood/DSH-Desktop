@@ -12,3 +12,4 @@ build/pnpm/
 *.log
 !scripts/.testdata/*.log
 *.tgz
+.isolated-run/
