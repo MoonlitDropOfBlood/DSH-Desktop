@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-12
+
+### 修复
+
+- **核心更新变砖三连（2026-09-12 事故，0.1.2-rc.1 → 0.1.5-rc.2 本机实测）**：更新时 park 失败降级原地安装后，npm 回退安装器在「purge 未删净的 pnpm 符号农场」上崩溃（`npm error Cannot read properties of null (reading 'matches')`，npm/cli#9459，至今未修复），而旧树已被掏空、又无 `dsh.prev` 回滚锚——新版装不上、旧版回不去，应用卡死在错误面板。三层加固：
+  - **`killDSH` 等到核心真正死亡才回调**：此前 taskkill 一返回就继续（那只代表 kill 已发起），park 的 rename 与死亡进程的句柄释放竞态——实测 park 的 EPERM 比 exit 事件还早 614ms。现轮询 exit 信号 + 400ms settle（上限 8s）后才放行后续文件手术。
+  - **`parkManagedDirForUpdate` rename 退避重试**：此前单次失败即降级原地安装、丢失回滚锚。现重试 4 次（700ms×n 退避）；`dsh.prev` 残留清理失败也单独记日志说明原因，不再伪装成笼统的 park 失败。
+  - **npm 路径 purge 必须验证干净，脏则自动换 pnpm**：pnpm 残留检测从「只看 `.modules.yaml`」改为「`.pnpm`/`.modules.yaml`/任何顶层符号链接」（此前第二、三次安装崩溃正是漏检了已失去 `.modules.yaml` 的半删农场）；删除改用带验证的 `rmTreeVerified`（Windows delete-pending 可让 `rmSync` 无报错却留下整棵 `.pnpm` + junction，实测如此），失败退避重试；仍脏则自动改用内置 pnpm 安装（对自己的符号农场免疫，不依赖 PATH），无 pnpm 可用才报错给面板——绝不再把毒树喂给 arborist。`prepareManagedDir` 的反向 purge 同步换用验证式删除。
+
 ## [1.8.0] - 2026-09-07
 
 ### 新增

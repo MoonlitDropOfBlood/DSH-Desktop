@@ -550,17 +550,16 @@
         <div class="rel-title">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m19.07 4.93-2.83 2.83"/><path d="M22 12h-4"/><path d="m19.07 19.07-2.83-2.83"/><path d="M12 22v-4"/><path d="m4.93 19.07 2.83-2.83"/><path d="M2 12h4"/><path d="m4.93 4.93 2.83 2.83"/></svg>
           <span data-i18n="rel.title">最新版本</span>
-          <span class="rel-tag" id="relTag">v1.5.0</span>
+          <span class="rel-tag" id="relTag">v1.8.1</span>
           <span class="rel-date" id="relDate"></span>
         </div>
         <a class="rel-all" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="rel.all">查看全部版本</a>
       </div>
       <div class="rel-body" id="relBody" data-i18n="rel.fallback">
-        <h4>v1.5.0 亮点</h4>
+        <h4>v1.8.1 亮点</h4>
         <ul>
-          <li><strong>插件故障自动恢复</strong>：插件导致的启动失败自动识别罪魁、卸载并重启，恢复后面板明确告知。</li>
-          <li><strong>任务通知限定主会话</strong>：子任务（subagent）的完成/失败/审批不再弹原生通知。</li>
-          <li><strong>重启稳定性</strong>：修复 Ctrl+Alt+R 偶发「端口已被占用」的残留竞态。</li>
+          <li><strong>更新稳定性</strong>：修复核心更新「park 竞态 → 原地安装 → npm 在半删依赖树上崩溃」导致的变砖链。</li>
+          <li><strong>自愈安装</strong>：更新前等待旧核心完全退出、验证依赖目录清理干净，必要时自动改用内置 pnpm 安装。</li>
         </ul>
       </div>
     </div>
@@ -710,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.5.0 亮点</h4><ul><li><strong>插件故障自动恢复</strong>：插件导致的启动失败自动识别罪魁、卸载并重启，恢复后面板明确告知。</li><li><strong>任务通知限定主会话</strong>：子任务（subagent）的完成/失败/审批不再弹原生通知。</li><li><strong>重启稳定性</strong>：修复 Ctrl+Alt+R 偶发「端口已被占用」的残留竞态。</li></ul>',
+      'rel.fallback': '<h4>v1.8.1 亮点</h4><ul><li><strong>更新稳定性</strong>：修复核心更新「park 竞态 → 原地安装 → npm 在半删依赖树上崩溃」导致的变砖链。</li><li><strong>自愈安装</strong>：更新前等待旧核心完全退出、验证依赖目录清理干净，必要时自动改用内置 pnpm 安装。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -803,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.5.0 highlights</h4><ul><li><strong>Plugin failure self-healing</strong>: when a broken plugin stops the core from booting, the culprit is identified, uninstalled and restarted automatically.</li><li><strong>Main-session-only notifications</strong>: subagent completion / failure / approval events no longer raise native notifications.</li><li><strong>Restart stability</strong>: fixed the leftover race behind the occasional "port already in use" on Ctrl+Alt+R.</li></ul>',
+      'rel.fallback': '<h4>v1.8.1 highlights</h4><ul><li><strong>Update stability</strong>: fixed the bricked-app chain during core updates (park race → in-place install → npm crash on a half-purged dependency tree).</li><li><strong>Self-healing install</strong>: updates now wait for the old core to fully exit, verify the dependency tree is fully cleaned, and fall back to the bundled pnpm automatically.</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -849,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.6.1';
+  var latestVer = 'v1.8.1';
   var lastRelease = null;
 
   function escHtml(s) {

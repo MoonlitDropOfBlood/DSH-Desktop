@@ -894,6 +894,51 @@ function pnpmStoreDir() {
 }
 
 /**
+ * rmSync that VERIFIES its work. Windows can complete an rm without any error
+ * yet leave entries behind while a dying process's handles are still
+ * releasing (delete-pending keeps the NAME visible until the last handle
+ * closes) — measured 2026-09-12: a purge that "succeeded" left the whole
+ * .pnpm store plus a junction, and the half-purged farm then crashed npm
+ * (npm/cli#9459). Retried with backoff; returns true only when the target is
+ * gone or provably empty (an empty dir is safe for both installers).
+ */
+function rmTreeVerified(target, label, attempts = 4) {
+  const emptyEnough = () => {
+    try { return fs.readdirSync(target).length === 0; } catch { return true; }
+  };
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+    } catch (err) {
+      log(`${label}: rm attempt ${attempt} failed: ${err.message}`);
+    }
+    if (!fs.existsSync(target) || emptyEnough()) return true;
+    if (attempt < attempts) {
+      log(`${label}: still present (delete-pending handles?) — retrying in ${600 * attempt}ms`);
+      syncSleep(600 * attempt);
+    }
+  }
+  return !fs.existsSync(target) || emptyEnough();
+}
+
+/**
+ * True when a node_modules still carries artifacts arborist must never see:
+ * the pnpm store layout (.pnpm/.modules.yaml) or top-level symlink/junction
+ * farm links. npm running over any of these without its own hidden lockfile
+ * can crash with "Cannot read properties of null (reading 'matches')"
+ * (npm/cli#9459, unfixed as of npm 11.19) instead of a clean error.
+ */
+function dirHasForeignInstallerArtifacts(nm) {
+  let entries = [];
+  try { entries = fs.readdirSync(nm); } catch { return false; }
+  if (entries.includes(".pnpm") || entries.includes(".modules.yaml")) return true;
+  for (const e of entries) {
+    try { if (fs.lstatSync(path.join(nm, e)).isSymbolicLink()) return true; } catch { /* raced away */ }
+  }
+  return false;
+}
+
+/**
  * Prepare the shell-owned managed dir for `pnpm add`:
  *  1. materialize a minimal package.json when absent (pnpm add requires one;
  *     a pnpm-managed install then keeps its own pnpm-lock.yaml across updates);
@@ -913,9 +958,13 @@ function prepareManagedDir() {
   try {
     fs.mkdirSync(dshDir(), { recursive: true });
     const nm = path.join(dshDir(), "node_modules");
-    if (fs.existsSync(nm) && !fs.existsSync(path.join(nm, ".modules.yaml"))) {
+    if (fs.existsSync(nm) && dirHasForeignInstallerArtifacts(nm)) {
       log("removing foreign (npm-era) node_modules before pnpm install");
-      fs.rmSync(nm, { recursive: true, force: true });
+      // Verified rm: pnpm tolerates leftover foreign junk (dead weight only),
+      // so a failed purge is logged, not fatal — but it must be visible.
+      if (!rmTreeVerified(nm, "pnpm-path purge")) {
+        log("pnpm-path purge could not fully clean node_modules — pnpm add proceeds over the leftovers");
+      }
     }
     // An npm-era package-lock.json is meaningless to pnpm — drop it.
     try { fs.rmSync(path.join(dshDir(), "package-lock.json"), { force: true }); } catch { /* ignore */ }
@@ -971,6 +1020,33 @@ function npmOnPath() {
   }
 }
 
+/** The pnpm install command for the managed dir, or null without a bundled /
+ *  fetched pnpm. Extracted so the npm path can fall back to it mid-install
+ *  when the managed dir cannot be made safe for arborist (npm/cli#9459). */
+function buildPnpmPlan() {
+  const pnpmCli = resolvePnpmCli();
+  if (!pnpmCli) return null;
+  const runtime = dshRuntime();
+  return {
+    installer: "pnpm",
+    command: runtime.command,
+    runAsNode: runtime.runAsNode,
+    args: [
+      pnpmCli, "add",
+      "--dir", dshDir(),
+      "--store-dir", pnpmStoreDir(),
+      // Line-per-line progress parseable by both the splash log and the
+      // stall watchdog (the default TTY renderer emits escape sequences).
+      "--reporter=append-only",
+      // An existing managed dir may hold a FOREIGN (npm-installed)
+      // node_modules; pnpm must purge it WITHOUT an interactive prompt
+      // (the splash has no TTY, a prompt would hang the install forever).
+      "--config.confirmModulesPurge=false",
+      coreSpec()
+    ]
+  };
+}
+
 function installPlan() {
   // DSH_DESKTOP_INSTALLER=npm|pnpm forces a choice (debugging / rollback);
   // otherwise pnpm stays the workhorse except for ≥0.1.2 targets, where npm
@@ -979,28 +1055,8 @@ function installPlan() {
   const forced = String(process.env.DSH_DESKTOP_INSTALLER || "").trim().toLowerCase();
   const wantNpm = forced === "npm" || (forced !== "pnpm" && targetLineSupportsNpm() && npmOnPath());
   if (!wantNpm) {
-    const pnpmCli = resolvePnpmCli();
-    if (pnpmCli) {
-      const runtime = dshRuntime();
-      return {
-        installer: "pnpm",
-        command: runtime.command,
-        runAsNode: runtime.runAsNode,
-        args: [
-          pnpmCli, "add",
-          "--dir", dshDir(),
-          "--store-dir", pnpmStoreDir(),
-          // Line-per-line progress parseable by both the splash log and the
-          // stall watchdog (the default TTY renderer emits escape sequences).
-          "--reporter=append-only",
-          // An existing managed dir may hold a FOREIGN (npm-installed)
-          // node_modules; pnpm must purge it WITHOUT an interactive prompt
-          // (the splash has no TTY, a prompt would hang the install forever).
-          "--config.confirmModulesPurge=false",
-          coreSpec()
-        ]
-      };
-    }
+    const pnpmPlan = buildPnpmPlan();
+    if (pnpmPlan) return pnpmPlan;
   }
   // NOTE: pass the prefix path RAW (no JSON.stringify) — npmSpawn hands each
   // arg to spawn separately and Node quotes paths with spaces correctly.
@@ -1400,23 +1456,33 @@ function ensureDSH(cb) {
  */
 function installDSH(cb) {
   const reg = resolveNpmRegistry();
-  const plan = installPlan();
+  let plan = installPlan();
   sendStatus(`正在安装最新版 DSH（${plan.installer}，镜像：${reg}）…\n首次安装约 ${INSTALL_ESTIMATE_MB}MB，可能需要几分钟。`);
   log(`installing dsh via ${reg} (${plan.installer})`);
   if (plan.installer === "pnpm") prepareManagedDir(); // pnpm add needs a package.json; purge npm-era node_modules
-  else {
-    // Mirror policy: a pnpm-era managed dir (symlink farm + .modules.yaml) is
-    // foreign to npm's flat layout — purge it so npm builds a clean tree
-    // instead of tripping over junctions. Safe: the core is stopped and the
-    // previous version is parked at dsh.prev during updates.
+  else if (dirHasForeignInstallerArtifacts(path.join(dshDir(), "node_modules"))) {
+    // Mirror policy: a pnpm-era managed dir (symlink farm + .pnpm store) is
+    // foreign to npm's flat layout — purge it so npm builds a clean tree.
+    // The purge MUST be verified: npm over a half-purged farm (delete-pending
+    // leftovers from a core that died mid-purge) crashes arborist with
+    // "Cannot read properties of null (reading 'matches')" (npm/cli#9459)
+    // — 2026-09-12 that left no install AND no old version: a bricked tree.
     const nm = path.join(dshDir(), "node_modules");
-    try {
-      if (fs.existsSync(path.join(nm, ".modules.yaml"))) {
-        log("removing pnpm-era node_modules before npm install");
-        fs.rmSync(nm, { recursive: true, force: true });
+    log("removing pnpm-era node_modules before npm install");
+    if (!rmTreeVerified(nm, "npm-path purge")) {
+      const pnpmPlan = buildPnpmPlan();
+      if (pnpmPlan) {
+        log("managed dir still dirty — npm aborted, switching installer to bundled pnpm");
+        plan = pnpmPlan;
+        prepareManagedDir();
+      } else {
+        // Refusing to feed arborist a poison tree beats a guaranteed crash:
+        // the error panel offers 重试 / 换镜像重试 (a later attempt can still
+        // succeed once the handles holding the tree release).
+        log("npm aborted: pnpm-era node_modules could not be fully removed and no bundled pnpm is available");
+        cb({ ok: false, code: -1, errTail: "pnpm-era node_modules could not be fully removed (files held by another process); bundled pnpm unavailable for fallback" });
+        return;
       }
-    } catch (err) {
-      log(`pnpm-era purge failed (continuing): ${err.message}`);
     }
   }
   const dirs = plan.installer === "pnpm" ? [pnpmStoreDir(), dshDir()] : [dshDir()];
@@ -1862,11 +1928,28 @@ function killDSH(cb) {
     return;
   }
   let done = false;
-  const finish = () => {
+  const settle = () => {
     if (!done) {
       done = true;
       afterOwned();
     }
+  };
+  // taskkill / SIGTERM returning only means the kill was REQUESTED — the OS
+  // tears the tree down asynchronously and callers do file surgery right
+  // after this callback (park rename, purge, port probe). Wait for actual
+  // death before firing: 2026-09-12 the park rename ran 614ms ahead of the
+  // exit event, EPERM'd, and the degraded in-place install bricked the tree.
+  const finish = () => {
+    if (done) return;
+    if (proc.exitCode !== null || proc.signalCode !== null) { settle(); return; }
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (proc.exitCode !== null || proc.signalCode !== null || Date.now() - t0 > 8000) {
+        clearInterval(iv);
+        syncSleep(400); // settle window: handle release can lag the death signal
+        settle();
+      }
+    }, 100);
   };
   if (process.platform === "win32") {
     try {
@@ -3083,18 +3166,44 @@ function parkedDshDir() {
  */
 function parkManagedDirForUpdate() {
   const prev = parkedDshDir();
+  // A leftover dsh.prev from an interrupted update must go — but its removal
+  // failing (AV holding it) blocks the rename below, so say WHY instead of
+  // masking it as a generic park failure.
   try {
-    fs.rmSync(prev, { recursive: true, force: true }); // leftover of an interrupted update
-    if (!fs.existsSync(dshDir())) return false; // first install — nothing to park
-    fs.renameSync(dshDir(), prev);
-    log("update: parked current install at dsh.prev (rollback anchor)");
-    return true;
+    fs.rmSync(prev, { recursive: true, force: true });
   } catch (err) {
-    // Rare (AV/indexer holding a handle on the tree). Fall back to the
-    // historical in-place install; the smoke boot still guards the commit.
-    log(`update: could not park managed dir (${err.message}) — installing in place`);
-    return false;
+    log(`update: leftover dsh.prev cleanup failed: ${err.message}`);
+    if (fs.existsSync(prev)) {
+      log("update: dsh.prev still present — cannot park, installing in place");
+      return false;
+    }
   }
+  if (!fs.existsSync(dshDir())) return false; // first install — nothing to park
+  // Retried with backoff: handles can lag the kill even past the death wait
+  // (AV/indexer, sandbox runner teardown). 2026-09-12 a single-shot rename
+  // EPERM'd against the dying core, degraded to an in-place install, and the
+  // failed npm install over the purged-in-place tree left no install AND no
+  // rollback anchor — a bricked app. Losing the anchor is the worst outcome;
+  // a few seconds of retries are cheap insurance.
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      fs.renameSync(dshDir(), prev);
+      log("update: parked current install at dsh.prev (rollback anchor)");
+      return true;
+    } catch (err) {
+      if (attempt < 4) {
+        const wait = 700 * attempt;
+        log(`update: park rename busy (${err.code || err.message}) — retry ${attempt}/3 in ${wait}ms`);
+        syncSleep(wait);
+      } else {
+        // Rare (handles held well past death). Fall back to the historical
+        // in-place install; the purge verification and pnpm fallback still
+        // guard the tree, and the smoke boot guards the commit.
+        log(`update: could not park managed dir (${err.message}) — installing in place`);
+      }
+    }
+  }
+  return false;
 }
 
 /** Swap the parked previous install back in. Returns true when restored.
