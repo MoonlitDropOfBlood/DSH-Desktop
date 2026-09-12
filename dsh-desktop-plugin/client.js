@@ -12,10 +12,21 @@
  *      The frameless window is dragged by two THIN drag strips whose heights
  *      are measured live so they only cover empty padding: one along the top
  *      edge above the session header, one above the sidebar's brand/buttons.
- *      The DSH header's "Session log" button is re-hosted here (next to
- *      minimize; the original is hidden via CSS), so the session header keeps
- *      its natural layout and the sidebar stays flush to the top. All colors
- *      come from DSH theme tokens, so the controls track the light/dark theme.
+ *      Button MODE is core-version dependent (the shell bridge reports the
+ *      installed core version; live DOM markers are the fallback while it
+ *      resolves): LEGACY cores (≤0.1.4) keep the fixed strip — 44px buttons
+ *      plus the re-hosted "Session log" capsule (the DSH original is hidden
+ *      via CSS). DSH 0.1.5+ instead renders the three buttons as DSH-NATIVE
+ *      28×28 round icon buttons (same metrics as the header/panel icon
+ *      buttons) in a small fixed corner group, visually appended RIGHT OF
+ *      the rightbar's own control in every UI state: with the sidebar
+ *      collapsed, the header's corner expand button is pushed left by a
+ *      constant margin override; with the sidebar open, the panel's own
+ *      chrome (fullscreen/collapse) is pushed left by the measured
+ *      --dsh-desktop-controls-clear var; with no/blank conversation the
+ *      group stands alone. The sidebar stays flush to the top and all
+ *      colors come from DSH theme tokens, so the controls track the
+ *      light/dark theme.
  *   2. A settings section ("核心") showing the installed core version, an
  *      update-channel selector (稳定版=latest / 体验版=next / 实验版=alpha),
  *      a "check for updates" button, an auto-update toggle, and a 重启核心
@@ -150,12 +161,18 @@ window.__ModuleLoader__.load({
 		}
 
 		// Session log, re-hosted in the window-control strip (next to minimize).
-		// The DSH header's own button is hidden via CSS so the session header
-		// keeps its natural layout. The action mirrors dsh-session-log-export:
-		// HEAD /api/session.export?sessionId=<current>&includeDescendants=true,
-		// then a same-origin anchor download. Visibility mirrors the DSH header:
-		// no open conversation, or a BLANK one (no conversation content yet), →
-		// no button (tracked via the sessions list feed).
+		// LEGACY cores (≤0.1.4) only — on those, the DSH header's own button is
+		// hidden via CSS so the session header keeps its natural layout. The
+		// action mirrors dsh-session-log-export: HEAD
+		// /api/session.export?sessionId=<current>&includeDescendants=true, then a
+		// same-origin anchor download. Visibility mirrors the DSH header: no open
+		// conversation, or a BLANK one (no conversation content yet), → no button
+		// (tracked via the sessions list feed).
+		// DSH 0.1.5 REPLACED the capsule with a 「更多操作」 ellipsis menu (class
+		// …_moreButton — the hide selector below simply stops matching) whose only
+		// item is this same download; on 0.1.5+ this capsule is therefore NOT
+		// re-hosted at all — DSH's own menu stays in the header and the window
+		// buttons move in-flow beside it (see the placement store below).
 		function SessionLogButton(props) {
 			const [busy, setBusy] = React.useState(false);
 			const [toast, setToast] = React.useState(null);
@@ -234,8 +251,129 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		// ---- window-button mode store (0.1.5 redesign) --------------------------
+		// LEGACY — ≤0.1.4 cores: the fixed strip's 44px buttons + the re-hosted
+		//          Session log capsule (today's behavior, untouched).
+		// MODERN — 0.1.5+: the three buttons become DSH-NATIVE 28×28 round icon
+		//          buttons (MiniWindowBtn, same metrics as the rightbar
+		//          ExpandButton / dockkit iconButton) rendered as a small fixed
+		//          corner group at top:10 right:8 — visually APPENDED RIGHT OF
+		//          the rightbar's own control in every UI state:
+		//          · conversation open, right sidebar collapsed → the header's
+		//            corner expand button is pushed left by a constant
+		//            margin-right:80px override ([data-conversation-header-corner],
+		//            derived from our own fixed metrics: 3×28px buttons + 2×4px
+		//            gaps + 8px gap + 8px window inset), so the group sits in the
+		//            freed corner space right of it;
+		//          · right sidebar OPEN → the corner button hides (:empty) and
+		//            the panel's own chrome (fullscreen/collapse) is pushed left
+		//            by the measured --dsh-desktop-controls-clear var instead;
+		//          · no/blank conversation → no DSH chrome at the top-right at
+		//            all, the group stands alone.
+		//          (An earlier draft put the buttons INSIDE the header via the
+		//          utilities list slot — abandoned: the slot's outlet is wrapped
+		//          in a real .headerUtilities flex div, so CSS order cannot move
+		//          an entry past the corner wrapper; absolute positioning inside
+		//          the slot would be the same pixels as this corner group with
+		//          strictly more machinery.)
+		// Signals are DETERMINISTIC, not DOM-timing races: the shell bridge's
+		// installed core version (numeric triplet ≥ 0.1.5 → modern) is
+		// authoritative; live DOM markers (the legacy capsule class / the 0.1.5
+		// corner attribute / the rightbar panel attribute) are the fallback
+		// while the version promise is still resolving.
+		const PLACEMENT = { LEGACY: "legacy", MODERN: "modern" };
+		function isModernVersion(v) {
+			const m = typeof v === "string" ? /^(\d+)\.(\d+)\.(\d+)/.exec(v) : null;
+			if (!m) return null; // unparseable → keep the DOM fallback
+			const t = [Number(m[1]), Number(m[2]), Number(m[3])];
+			// The rightbar panel and the header corner both first shipped on the
+			// 0.1.5 line (dsh-client-ui-sidebar-right first published 0.1.5-alpha.1),
+			// so the numeric triplet alone decides — prerelease tags don't matter.
+			return t[0] > 0 || t[1] > 1 || (t[1] === 1 && t[2] >= 5);
+		}
+		function createPlacementStore() {
+			let versionModern = null; // null = bridge hasn't answered yet
+			let placement = null;     // lazily computed on the first snapshot
+			const listeners = new Set();
+			const compute = () => {
+				let legacyMarker = false;
+				let corner = false;
+				let rightbar = false;
+				try {
+					// The legacy capsule stays in the DOM even while our CSS hides
+					// it, so its class pins every ≤0.1.4 core reliably.
+					legacyMarker = !!document.querySelector('[class*="sessionLogButton"]');
+					corner = !!document.querySelector("[data-conversation-header-corner]");
+					rightbar = !!document.querySelector("[data-sidebar-right-panel]");
+				} catch (e) { /* keep the falses */ }
+				const modern = versionModern !== null
+					? versionModern
+					: (legacyMarker ? false : (corner || rightbar));
+				return modern ? PLACEMENT.MODERN : PLACEMENT.LEGACY;
+			};
+			const notify = () => {
+				const next = compute();
+				if (next === placement) return;
+				placement = next;
+				for (const fn of Array.from(listeners)) { try { fn(); } catch (e) { /* noop */ } }
+			};
+			return {
+				subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+				getSnapshot: () => {
+					if (placement === null) placement = compute();
+					return placement;
+				},
+				setVersion: (v) => {
+					const parsed = isModernVersion(v);
+					if (parsed === null || parsed === versionModern) return;
+					versionModern = parsed;
+					notify();
+				},
+				notifyDomChanged: notify
+			};
+		}
+		// Created in apply() before any slot registration; lazily re-created on
+		// first render as a belt-and-suspenders for HMR ordering.
+		let placementStore = null;
+		function usePlacement() {
+			if (!placementStore) placementStore = createPlacementStore();
+			return React.useSyncExternalStore(
+				placementStore.subscribe,
+				placementStore.getSnapshot,
+				placementStore.getSnapshot
+			);
+		}
+
+		// 0.1.5+ native-style window button: 28×28 round icon button matching
+		// DSH's own header/panel controls (the rightbar ExpandButton / dockkit
+		// iconButton metrics — 28px box, fully round, 15px glyph,
+		// label-secondary ink, interactive-bg-hover on hover; close keeps the
+		// platform red-hover convention).
+		function MiniWindowBtn(props) {
+			return React.createElement("button", {
+				type: "button",
+				className: "dsh-desktop-mini-btn" + (props.kind === "close" ? " is-close" : ""),
+				title: props.title,
+				onClick: (e) => {
+					e.stopPropagation();
+					if (hasBridge("windowControl")) bridge().windowControl(props.kind);
+				}
+			},
+				React.createElement("svg", {
+					width: 15, height: 15, viewBox: "0 0 24 24", fill: "none",
+					stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
+					strokeLinejoin: "round", "aria-hidden": true
+				}, WINDOW_ICONS[props.kind].map((d, i) => React.createElement("path", { key: i, d })))
+			);
+		}
+
 		function WindowControls(props) {
 			const controlsRef = React.useRef(null);
+			// Button rendering comes from the shared mode store: LEGACY renders
+			// the strip's 44px buttons + the re-hosted capsule exactly as before;
+			// MODERN renders the small native-style corner group (the drag
+			// strips below are shared by both modes).
+			const placement = usePlacement();
 			React.useEffect(() => {
 				const host = controlsRef.current;
 				if (!host) return undefined;
@@ -254,13 +392,16 @@ window.__ModuleLoader__.load({
 				const sync = () => {
 					const left = sidebar ? Math.round(sidebar.getBoundingClientRect().right) : 0;
 					host.style.left = left + "px";
+					// Left edge of the LEFTMOST control group: the drag region
+					// ends here. LEGACY: the capsule / 44px buttons; MODERN: the
+					// corner group.
+					let firstBtnLeft = null;
+					for (const el of host.querySelectorAll(".dsh-desktop-btn, .dsh-desktop-sessionlog, .dsh-desktop-corner-group")) {
+						const r = el.getBoundingClientRect();
+						if (r.width > 0 && (firstBtnLeft === null || r.left < firstBtnLeft)) firstBtnLeft = r.left;
+					}
 					const drag = host.querySelector(".dsh-desktop-drag");
 					if (drag) {
-						let firstBtnLeft = null;
-						for (const el of host.querySelectorAll(".dsh-desktop-btn, .dsh-desktop-sessionlog")) {
-							const r = el.getBoundingClientRect();
-							if (r.width > 0 && (firstBtnLeft === null || r.left < firstBtnLeft)) firstBtnLeft = r.left;
-						}
 						drag.style.right = (firstBtnLeft === null ? 0 : Math.max(0, window.innerWidth - firstBtnLeft)) + "px";
 						drag.style.height = topClearance(document.querySelector('[data-slot="conversation.session.header"]'), DRAG_STRIP_MAX_MAIN) + "px";
 					}
@@ -273,6 +414,24 @@ window.__ModuleLoader__.load({
 						dragSide.style.width = left + "px";
 						dragSide.style.height = (left > 0 && sidebar ? topClearance(sidebar) : 0) + "px";
 					}
+					// Publish the MODERN corner group's width for the 0.1.5+
+					// right-panel chrome clearance rule: when the right sidebar
+					// is OPEN, its dock tab strip's trailing controls
+					// (fullscreen/collapse, data-sidebar-right-mode / -toggle)
+					// sit at the window's top-right corner — exactly where the
+					// corner group lives — so their margin-right pushes them
+					// clear of it. Zero on legacy cores (no corner group
+					// rendered there); the var's only consumer is an attribute
+					// that exists on 0.1.5+ DOM anyway.
+					let clear = 0;
+					const group = host.querySelector(".dsh-desktop-corner-group");
+					if (group) {
+						const r = group.getBoundingClientRect();
+						if (r.width > 0) clear = Math.max(0, window.innerWidth - r.left) + 8;
+					}
+					if (document.documentElement) {
+						document.documentElement.style.setProperty("--dsh-desktop-controls-clear", clear + "px");
+					}
 				};
 				sync();
 				let ro = null;
@@ -280,9 +439,11 @@ window.__ModuleLoader__.load({
 					ro = new ResizeObserver(sync);
 					ro.observe(sidebar);
 				}
-				// Re-measure when the button set changes — e.g. the Session log
-				// capsule appears/disappears as a conversation opens/closes — so
-				// the drag region never ends up covering a newly shown button.
+				// Re-measure when the rendered control set changes — placement
+				// flips swap the button groups, and on legacy cores the Session
+				// log capsule appears/disappears as a conversation opens/closes
+				// — so the drag region and the panel clearance never lag the
+				// buttons.
 				let mo = null;
 				if (typeof MutationObserver !== "undefined") {
 					mo = new MutationObserver(sync);
@@ -302,11 +463,12 @@ window.__ModuleLoader__.load({
 			// window drag handle is a THIN sibling strip at the very top edge
 			// (height measured live to end just above the header's content), plus
 			// a second strip covering the empty area above the sidebar's
-			// brand/buttons. The right end of the strip holds, in order: the
-			// re-hosted Session log capsule, minimize, maximize, close. The
-			// SIDEBAR stays flush to the top and untouched; the session header is
-			// left in its natural layout (the original Session log button is
-			// hidden via CSS).
+			// brand/buttons. What the strip hosts depends on the mode store:
+			// LEGACY cores get the 44px buttons + the re-hosted Session log
+			// capsule at the right end; MODERN (0.1.5+) gets the small
+			// native-style corner group (28×28 round icon buttons, aligned with
+			// DSH's own button rows). The SIDEBAR stays flush to the top and
+			// untouched in every mode.
 			//
 			// LAYER: rendered via ReactDOM.createPortal into document.body, NOT
 			// inside the shell.overlay slot host. The slot host lives in DSH's
@@ -319,16 +481,32 @@ window.__ModuleLoader__.load({
 			// document.body.appendChild(host) was WRONG: it stole a React-managed
 			// DOM node, so the slot's next render crashed reconciliation and the
 			// buttons went dead — never reparent a React-owned node by hand.)
+			const isLegacy = placement === PLACEMENT.LEGACY;
 			return ReactDOM.createPortal(
 				React.createElement(
 					"div",
 					{ ref: controlsRef, className: "dsh-desktop-controls", role: "group", "aria-label": "窗口控制" },
 					React.createElement("div", { className: "dsh-desktop-drag-side" }),
 					React.createElement("div", { className: "dsh-desktop-drag" }),
-					React.createElement(SessionLogButton, { sessions: props && props.sessions }),
-					React.createElement(WindowBtn, { kind: "minimize", title: "最小化" }),
-					React.createElement(WindowBtn, { kind: "toggleMaximize", title: "最大化 / 还原" }),
-					React.createElement(WindowBtn, { kind: "close", title: "关闭" })
+					// LEGACY cores (≤0.1.4) only: re-host the Session log capsule
+					// here; 0.1.5+ keeps DSH's own 「更多操作」 menu in the header
+					// (nothing is hidden there, so no capsule is needed).
+					isLegacy
+						? React.createElement(SessionLogButton, { sessions: props && props.sessions })
+						: null,
+					isLegacy ? React.createElement(WindowBtn, { kind: "minimize", title: "最小化" }) : null,
+					isLegacy ? React.createElement(WindowBtn, { kind: "toggleMaximize", title: "最大化 / 还原" }) : null,
+					isLegacy ? React.createElement(WindowBtn, { kind: "close", title: "关闭" }) : null,
+					// MODERN (0.1.5+): native-style corner group, aligned with
+					// DSH's own 28px button rows and sitting right of the
+					// rightbar's own control in every UI state (see the mode
+					// store comment for the three cases).
+					!isLegacy
+						? React.createElement("div", { className: "dsh-desktop-corner-group", role: "group", "aria-label": "窗口控制" },
+							React.createElement(MiniWindowBtn, { kind: "minimize", title: "最小化" }),
+							React.createElement(MiniWindowBtn, { kind: "toggleMaximize", title: "最大化 / 还原" }),
+							React.createElement(MiniWindowBtn, { kind: "close", title: "关闭" }))
+						: null
 				),
 				document.body
 			);
@@ -763,8 +941,69 @@ window.__ModuleLoader__.load({
    when the Electron bridge is present. In a plain browser (which may be served
    by the same desktop-patched DSH instance) no marker is set, so DSH keeps its
    own original button. This also supersedes the earlier push-down hacks
-   (padding-right / align-items + margin-top), which are gone. */
+   (padding-right / align-items + margin-top), which are gone.
+   LEGACY cores only: 0.1.5 replaced the capsule with a 「更多操作」 menu (class
+   …_moreButton, so this selector simply does not match) — there DSH's own
+   menu stays in the header and the window buttons move in-flow beside it. */
 [data-dsh-desktop] [class*="sessionLogButton"] { display: none !important; }
+
+/* 0.1.5+ native-style window buttons (28×28, matching DSH's own header/panel
+   icon buttons — the rightbar ExpandButton / dockkit iconButton metrics:
+   28px box, fully round, 15px glyph, label-secondary ink,
+   interactive-bg-hover on hover). Close keeps the platform red-hover
+   convention. */
+.dsh-desktop-mini-btn {
+  -webkit-app-region: no-drag; pointer-events: auto;
+  width: 28px; height: 28px; margin: 0; padding: 6px; box-sizing: border-box;
+  border: none; border-radius: 28px; background: transparent;
+  color: var(--dsw-alias-label-secondary, #61666b);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background 0.12s, color 0.12s; flex: none;
+}
+.dsh-desktop-mini-btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--dsw-alias-label-primary, #0f1115);
+}
+.dsh-desktop-mini-btn.is-close:hover { background: #e81123; color: #fff; }
+
+/* In-flow illusion on 0.1.5+, state "conversation open + right sidebar
+   collapsed": the header's corner seat (the rightbar expand button, a
+   data-conversation-header-corner wrapper) is pushed left by a CONSTANT
+   margin, so our fixed corner group lands in the freed space immediately
+   RIGHT of it — appended right of the sidebar button, exactly like a native
+   control. Derivation: the corner's box right edge + margin = the titleRow
+   content-box right edge (window right − 28px header padding); the group
+   occupies 3×28px buttons + 2×4px gaps = 92px ending at window right − 8px,
+   so the corner must end at ≤ window right − 108px → margin 108 − 28 = 80px.
+   (Overrides the wrapper's own margin-right:-16px via higher specificity.)
+   When the right sidebar is OPEN the corner is :empty (display:none) and
+   this rule is inert. Constant, never measured: if DSH ever grows the
+   header's right padding the gap just widens — it can never overlap. */
+[data-dsh-desktop] [data-conversation-header-corner] {
+  margin-right: 80px;
+}
+
+/* FIXED corner group (0.1.5+): aligned with DSH's own 28px button rows —
+   the 0.1.5 header titleRow and the dock tab strip both put their buttons
+   at y≈10..38 — with an 8px window inset. */
+.dsh-desktop-controls .dsh-desktop-corner-group {
+  position: absolute; top: 10px; right: 8px;
+  display: flex; align-items: center; gap: 4px;
+}
+
+/* DSH 0.1.5+ right-panel chrome clearance: when the right sidebar is OPEN,
+   its dock tab strip's trailing controls (fullscreen toggle
+   data-sidebar-right-mode / collapse data-sidebar-right-toggle, a flex row
+   whose margin-left:auto cluster hugs the strip's right edge) sit at the
+   window's top-right corner — where the FIXED corner group lives. Pushing
+   the collapse button's right margin out by the measured group width moves
+   the whole chrome cluster clear of the window buttons. The attribute only
+   exists on 0.1.5+ (the sidebar-right package first shipped 0.1.5-alpha.1),
+   so legacy cores are structurally untouched; the JS publishes
+   --dsh-desktop-controls-clear only while the corner group is rendered. */
+[data-dsh-desktop] [data-sidebar-right-toggle] {
+  margin-right: var(--dsh-desktop-controls-clear, 0px);
+}
 
 /* Green update badge (a DSH outline Button re-tinted green). */
 .dsh-desktop-update-badge { border-color: #22c55e !important; color: #22c55e !important; }
@@ -874,11 +1113,36 @@ window.__ModuleLoader__.load({
 			}
 			if (typeof ctx.effect === "function") ctx.effect(() => () => {
 				styleTag.remove();
-				if (document.documentElement) document.documentElement.removeAttribute("data-dsh-desktop");
+				if (document.documentElement) {
+					document.documentElement.removeAttribute("data-dsh-desktop");
+					document.documentElement.style.removeProperty("--dsh-desktop-controls-clear");
+				}
 			});
 			// Mark our settings-nav rows (核心 / 桌面版) so the CSS above
 			// replaces the shell's fallback gear for both sections.
 			if (typeof ctx.effect === "function") ctx.effect(() => registerSettingsNavIcons(SETTINGS_NAV_ENTRIES));
+
+			// Window-button mode store: created BEFORE any slot registration so
+			// WindowControls can subscribe on first render. Signals: the shell
+			// bridge's installed core version (authoritative modern/legacy gate)
+			// plus a body observer for the live DOM markers (fallback while the
+			// version promise resolves).
+			placementStore = createPlacementStore();
+			if (isDesktop && hasBridge("getUpdateState")) {
+				bridge().getUpdateState()
+					.then((s) => { if (s && typeof s.installed === "string") placementStore.setVersion(s.installed); })
+					.catch(() => { /* keep the DOM fallback */ });
+			}
+			if (typeof MutationObserver !== "undefined" && typeof ctx.effect === "function") {
+				ctx.effect(() => {
+					const mo = new MutationObserver(() => placementStore.notifyDomChanged());
+					mo.observe(document.body, {
+						childList: true, subtree: true, attributes: true,
+						attributeFilter: ["data-sidebar-right-open"]
+					});
+					return () => mo.disconnect();
+				});
+			}
 
 			ctx.slots.inject("shell.overlay", () => ctx.slots.register(
 				{
