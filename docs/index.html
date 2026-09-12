@@ -381,7 +381,7 @@
         <span data-i18n="hero.cta2">在 GitHub 上查看</span>
       </a>
     </div>
-    <p class="hint" data-i18n="hero.hint">当前版本 v1.5.0 · 自动安装并保持 DSH 核心最新</p>
+    <p class="hint" data-i18n="hero.hint">当前版本 v1.8.2 · 自动安装并保持 DSH 核心最新</p>
   </div>
 
   <!-- pure-CSS frameless window mockup -->
@@ -550,16 +550,16 @@
         <div class="rel-title">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m19.07 4.93-2.83 2.83"/><path d="M22 12h-4"/><path d="m19.07 19.07-2.83-2.83"/><path d="M12 22v-4"/><path d="m4.93 19.07 2.83-2.83"/><path d="M2 12h4"/><path d="m4.93 4.93 2.83 2.83"/></svg>
           <span data-i18n="rel.title">最新版本</span>
-          <span class="rel-tag" id="relTag">v1.8.1</span>
+          <span class="rel-tag" id="relTag">v1.8.2</span>
           <span class="rel-date" id="relDate"></span>
         </div>
         <a class="rel-all" href="https://github.com/MoonlitDropOfBlood/DSH-Desktop/releases" target="_blank" rel="noopener" data-i18n="rel.all">查看全部版本</a>
       </div>
       <div class="rel-body" id="relBody" data-i18n="rel.fallback">
-        <h4>v1.8.1 亮点</h4>
+        <h4>v1.8.2 亮点</h4>
         <ul>
-          <li><strong>更新稳定性</strong>：修复核心更新「park 竞态 → 原地安装 → npm 在半删依赖树上崩溃」导致的变砖链。</li>
-          <li><strong>自愈安装</strong>：更新前等待旧核心完全退出、验证依赖目录清理干净，必要时自动改用内置 pnpm 安装。</li>
+          <li><strong>金刚键重设计（DSH 0.1.5+）</strong>：最小化 / 最大化 / 关闭改为与 DSH 原生按钮同规格的角落小组件，根治与新版会话头部、右侧栏按钮的遮挡冲突，模式按已装核心版本自动判定。</li>
+          <li><strong>老核心零影响</strong>：≤0.1.4 完全保持原有窗口控制条与拖拽行为。</li>
         </ul>
       </div>
     </div>
@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.8.1 亮点</h4><ul><li><strong>更新稳定性</strong>：修复核心更新「park 竞态 → 原地安装 → npm 在半删依赖树上崩溃」导致的变砖链。</li><li><strong>自愈安装</strong>：更新前等待旧核心完全退出、验证依赖目录清理干净，必要时自动改用内置 pnpm 安装。</li></ul>',
+      'rel.fallback': '<h4>v1.8.2 亮点</h4><ul><li><strong>金刚键重设计（DSH 0.1.5+）</strong>：最小化 / 最大化 / 关闭改为与 DSH 原生按钮同规格的角落小组件，根治与新版会话头部、右侧栏按钮的遮挡冲突，模式按已装核心版本自动判定。</li><li><strong>老核心零影响</strong>：≤0.1.4 完全保持原有窗口控制条与拖拽行为。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.8.1 highlights</h4><ul><li><strong>Update stability</strong>: fixed the bricked-app chain during core updates (park race → in-place install → npm crash on a half-purged dependency tree).</li><li><strong>Self-healing install</strong>: updates now wait for the old core to fully exit, verify the dependency tree is fully cleaned, and fall back to the bundled pnpm automatically.</li></ul>',
+      'rel.fallback': '<h4>v1.8.2 highlights</h4><ul><li><strong>Redesigned window controls (DSH 0.1.5+)</strong>: minimize / maximize / close become a corner widget in the same compact style as DSH native icon buttons, fixing occlusion conflicts with the new conversation header and right sidebar panel; the mode is detected from the installed core version.</li><li><strong>Older cores unaffected</strong>: 0.1.4 and below keep the existing control strip and window-drag behavior.</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.8.1';
+  var latestVer = 'v1.8.2';
   var lastRelease = null;
 
   function escHtml(s) {
