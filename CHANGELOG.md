@@ -8,7 +8,14 @@
 
 ## [Unreleased]
 
-## [1.8.2] - 2026-09-12
+## [1.9.0] - 2026-09-14
+
+### 变更
+
+- **启动页（splash）全面美化**：卡片式布局（圆角 16px + 双层阴影）、品牌鲸鱼 SVG logo 带旋转光环动画、渐变标题文字、进度条 shimmer 扫光动画、全部元素 fade-in-up 入场动画、按钮 hover/active 状态反馈（缩放 + 颜色过渡）。
+- **启动页深/浅主题自动适配**：读取 DSH `settings.yaml` 的 `ui-theme.preference`（system/dark/light），经 Electron `nativeTheme` + CSS 变量双主题系统切换——深色以 `#0b1120` 为基底、浅色以 `#f0f2f5` 为基底，强调色、边框、文字、错误面板全部跟随。preload 桥新增 `getThemeSync()`（同步查询，首次渲染零闪烁）与 `onThemeChange()`（实时推送）；窗口 `backgroundColor` 按主题预设，不出现错误色闪烁。
+- **窗口控制按钮统一为 SVG 图标**：启动页标题栏的最小化/最大化/关闭按钮从文本字符（`–` `□` `✕`，光学大小/线宽不一）替换为 12×12 统一 stroke-width 的内联 SVG（Lucide 几何），风格与 DSH 客户端插件控制条一致。
+- **错误面板精致化**：错误/信息图标从文本字符改为 SVG（警告三角形/信息圆圈），放在 36×36 圆角方形底色上（`color-mix` 主题色 12% 透明度）；错误状态不再显示 loading spinner；面板带 fade-in 动画；danger 按钮 hover 用 `color-mix` 替代硬编码颜色。
 
 ### 变更
 

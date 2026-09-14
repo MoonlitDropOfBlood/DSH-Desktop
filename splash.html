@@ -5,152 +5,397 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'" />
 <title>鲸港 WhaleHarbor — DeepSeek Harness 桌面端</title>
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  /* author CSS must not defeat the `hidden` attribute (e.g. .port-row flex) */
-  [hidden] { display: none !important; }
-  html, body {
-    height: 100%;
-    margin: 0;
-    background: #0b1120;
-    color: #e5e9f2;
-    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-  }
-  /* custom title bar (frameless window) — controls work even if DSH fails */
-  #titlebar {
-    height: 38px;
-    display: flex; align-items: center; padding-left: 12px;
-    background: #0b1120; border-bottom: 1px solid #1d2840;
-    -webkit-app-region: drag; user-select: none;
-  }
-  #titlebar .drag { flex: 1; height: 100%; -webkit-app-region: drag; }
-  #titlebar .title { color: #7f8aa0; font-size: 12px; margin-right: 8px; }
-  #titlebar .btn {
-    -webkit-app-region: no-drag; width: 46px; height: 100%;
-    display: flex; align-items: center; justify-content: center;
-    color: #9aa5b8; font-size: 13px; cursor: pointer; transition: background 0.12s;
-    border: none; background: transparent;
-  }
-  #titlebar .btn:hover { background: #1d2840; color: #e5e9f2; }
-  #titlebar .close:hover { background: #e81123; color: #fff; }
-  .body {
-    display: flex; align-items: center; justify-content: center;
-    text-align: center; padding: 24px;
-  }
-  .box { max-width: 660px; width: 90%; }
-  .spinner {
-    width: 44px; height: 44px; margin: 0 auto 22px;
-    border: 4px solid rgba(94, 140, 255, 0.25);
-    border-top-color: #5e8cff;
-    border-radius: 50%;
-    animation: spin 0.9s linear infinite;
-  }
-  .spinner.hidden { display: none; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  h1 { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
-  #status { font-size: 13px; color: #9aa5b8; white-space: pre-line; line-height: 1.6; margin-bottom: 16px; }
-  .error { color: #ff6b6b !important; }
-  #log {
-    max-height: 180px;
-    overflow-y: auto;
-    text-align: left;
-    font-size: 11px;
-    font-family: Consolas, "Courier New", monospace;
-    color: #7f8aa0;
-    background: #0e1526;
-    border: 1px solid #1d2840;
-    border-radius: 6px;
-    padding: 10px 12px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-all;
-    display: none;
-    margin-top: 12px;
-  }
-  #log.has-content { display: block; }
+/* ============================================================
+   Theme tokens — two palettes swapped by [data-theme] on <html>.
+   DSH's own ui-theme.preference (system / dark / light) drives it:
+   the preload bridge calls applyTheme() before first paint.
+   ============================================================ */
+:root {
+  color-scheme: dark;
+  --bg: #0b1120;
+  --bg-elevated: #111827;
+  --bg-card: #0e1526;
+  --bg-input: #0e1526;
+  --bg-hover: #1d2840;
+  --bg-active: #1d2b4d;
+  --border: #1d2840;
+  --border-strong: #2a3a5f;
+  --text: #e5e9f2;
+  --text-secondary: #9aa5b8;
+  --text-muted: #7f8aa0;
+  --accent: #3b6cff;
+  --accent-hover: #2f5ae0;
+  --accent-glow: rgba(59, 108, 255, 0.35);
+  --accent-light: #5e8cff;
+  --error: #ff6b6b;
+  --error-bg: #120d18;
+  --error-border: #3a2434;
+  --error-text: #ff8f8f;
+  --info-bg: #0d1424;
+  --info-border: #1f3a5f;
+  --info-icon: #6fb3ff;
+  --info-text: #8fc3ff;
+  --success: #4ade80;
+  --titlebar-bg: #0b1120;
+  --titlebar-border: #1d2840;
+  --titlebar-text: #7f8aa0;
+  --titlebar-btn-hover: #1d2840;
+  --titlebar-btn-hover-text: #e5e9f2;
+  --titlebar-close-hover: #e81123;
+  --titlebar-close-hover-text: #fff;
+  --shadow: rgba(0, 0, 0, 0.4);
+  --log-bg: #0e1526;
+  --progress-track: #16203a;
+  --spinner-track: rgba(94, 140, 255, 0.25);
+  --gradient-start: #0b1120;
+  --gradient-end: #0e1a2e;
+  --wave-color: rgba(59, 108, 255, 0.06);
+}
 
-  /* determinate install progress */
-  .progress-wrap { margin: 0 auto 14px; max-width: 520px; }
-  .progress {
-    height: 8px; border-radius: 4px; overflow: hidden;
-    background: #16203a; border: 1px solid #1d2840;
-  }
-  .progress .bar {
-    height: 100%; width: 0%;
-    background: linear-gradient(90deg, #3b6cff, #5e8cff);
-    transition: width 0.3s ease;
-    border-radius: 4px;
-  }
-  .progress-text { margin-top: 8px; font-size: 12px; color: #7f8aa0; }
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f0f2f5;
+  --bg-elevated: #ffffff;
+  --bg-card: #f7f8fa;
+  --bg-input: #ffffff;
+  --bg-hover: #e8eaee;
+  --bg-active: #dde0e6;
+  --border: #d0d4dc;
+  --border-strong: #b8bec8;
+  --text: #1a1d23;
+  --text-secondary: #5a6270;
+  --text-muted: #8a919e;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-glow: rgba(37, 99, 235, 0.2);
+  --accent-light: #3b82f6;
+  --error: #dc2626;
+  --error-bg: #fef2f2;
+  --error-border: #fecaca;
+  --error-text: #b91c1c;
+  --info-bg: #eff6ff;
+  --info-border: #bfdbfe;
+  --info-icon: #2563eb;
+  --info-text: #1e40af;
+  --success: #16a34a;
+  --titlebar-bg: #e8eaee;
+  --titlebar-border: #d0d4dc;
+  --titlebar-text: #5a6270;
+  --titlebar-btn-hover: #d0d4dc;
+  --titlebar-btn-hover-text: #1a1d23;
+  --titlebar-close-hover: #e81123;
+  --titlebar-close-hover-text: #fff;
+  --shadow: rgba(0, 0, 0, 0.08);
+  --log-bg: #f7f8fa;
+  --progress-track: #e0e3e8;
+  --spinner-track: rgba(37, 99, 235, 0.15);
+  --gradient-start: #e8ecf1;
+  --gradient-end: #d1d9e6;
+  --wave-color: rgba(37, 99, 235, 0.04);
+}
 
-  /* startup / crash error panel */
-  #errorPanel {
-    display: none;
-    margin-top: 4px;
-    text-align: left;
-    background: #120d18;
-    border: 1px solid #3a2434;
-    border-radius: 10px;
-    padding: 18px 20px;
-  }
-  #errorPanel.visible { display: block; }
-  /* info variant (e.g. plugin auto-recovery notice) — calm blue, not alarm red */
-  #errorPanel.info { background: #0d1424; border-color: #1f3a5f; }
-  #errorPanel.info .error-icon { color: #6fb3ff; }
-  #errorPanel.info #errorTitle { color: #8fc3ff; }
-  .error-icon {
-    font-size: 22px; line-height: 1;
-    color: #ff6b6b; margin-bottom: 10px;
-  }
-  #errorTitle { font-size: 15px; font-weight: 600; color: #ff8f8f; margin-bottom: 6px; }
-  #errorDetail {
-    font-size: 12px; color: #a8b3c8; line-height: 1.6;
-    white-space: pre-wrap; word-break: break-all;
-    max-height: 160px; overflow-y: auto;
-    margin-bottom: 14px;
-  }
-  .port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .port-row label { font-size: 13px; color: #9aa5b8; }
-  .port-row input {
-    width: 110px; padding: 6px 10px;
-    background: #0e1526; color: #e5e9f2;
-    border: 1px solid #2a3a5f; border-radius: 6px;
-    font-size: 13px;
-  }
-  .port-row .hint { font-size: 11px; color: #7f8aa0; }
-  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-  .actions .act {
-    padding: 8px 18px; border-radius: 8px; cursor: pointer;
-    font-size: 13px; border: 1px solid #2a3a5f;
-    background: #16203a; color: #dbe4f5;
-    transition: background 0.12s, border-color 0.12s;
-  }
-  .actions .act:hover { background: #1d2b4d; }
-  .actions .act.primary { background: #3b6cff; border-color: #3b6cff; color: #fff; }
-  .actions .act.primary:hover { background: #2f5ae0; }
-  .actions .act.danger { background: #3a1b1b; border-color: #5c2a2a; color: #ff9c9c; }
-  .actions .act.danger:hover { background: #4a2222; }
-  .copy {
-    margin-top: 12px; padding: 6px 14px; border-radius: 7px; cursor: pointer;
-    font-size: 12px; border: 1px solid #2a3a5f;
-    background: transparent; color: #7f8aa0; transition: color 0.12s, border-color 0.12s;
-  }
-  .copy:hover { color: #dbe4f5; border-color: #3b6cff; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* ---- custom title bar (frameless) ---- */
+#titlebar {
+  height: 38px;
+  display: flex; align-items: center; padding-left: 12px;
+  background: var(--titlebar-bg);
+  border-bottom: 1px solid var(--titlebar-border);
+  -webkit-app-region: drag; user-select: none;
+  position: relative; z-index: 10;
+}
+#titlebar .drag { flex: 1; height: 100%; -webkit-app-region: drag; }
+#titlebar .title {
+  color: var(--titlebar-text); font-size: 12px; margin-right: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+#titlebar .title svg { width: 14px; height: 14px; }
+#titlebar .btn {
+  -webkit-app-region: no-drag; width: 46px; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); cursor: pointer;
+  border: none; background: transparent;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+#titlebar .btn svg {
+  width: 12px; height: 12px;
+  stroke: currentColor; stroke-width: 2;
+  fill: none; stroke-linecap: round; stroke-linejoin: round;
+}
+#titlebar .btn:hover {
+  background: var(--titlebar-btn-hover);
+  color: var(--titlebar-btn-hover-text);
+}
+#titlebar .btn.close:hover {
+  background: var(--titlebar-close-hover);
+  color: var(--titlebar-close-hover-text);
+}
+
+/* ---- main body ---- */
+.body {
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 24px;
+  height: calc(100% - 38px);
+  background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
+  position: relative;
+}
+/* subtle decorative waves */
+.body::before {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 600px 400px at 20% 80%, var(--wave-color) 0%, transparent 70%),
+    radial-gradient(ellipse 500px 350px at 80% 20%, var(--wave-color) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.box {
+  max-width: 560px; width: 92%;
+  position: relative; z-index: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px 36px 32px;
+  box-shadow: 0 8px 32px var(--shadow), 0 2px 8px var(--shadow);
+}
+
+/* ---- whale logo ---- */
+.logo-wrap {
+  width: 72px; height: 72px;
+  margin: 0 auto 20px;
+  position: relative;
+}
+.logo-wrap svg {
+  width: 100%; height: 100%;
+  filter: drop-shadow(0 0 12px var(--accent-glow));
+}
+.logo-ring {
+  position: absolute; inset: -6px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-light);
+  animation: spin 1.2s linear infinite;
+}
+
+/* ---- spinner (hidden when logo ring shows) ---- */
+.spinner {
+  width: 40px; height: 40px; margin: 0 auto 18px;
+  border: 3px solid var(--spinner-track);
+  border-top-color: var(--accent-light);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.spinner.hidden { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- text ---- */
+h1 {
+  font-size: 20px; font-weight: 700; margin: 0 0 6px;
+  letter-spacing: 0.02em;
+  background: linear-gradient(135deg, var(--text) 0%, var(--accent-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.subtitle {
+  font-size: 12px; color: var(--text-muted); margin-bottom: 20px;
+  letter-spacing: 0.04em;
+}
+#status {
+  font-size: 13px; color: var(--text-secondary);
+  white-space: pre-line; line-height: 1.6; margin-bottom: 18px;
+  min-height: 20px;
+}
+#status.error { color: var(--error) !important; }
+
+/* ---- progress bar ---- */
+.progress-wrap { margin: 0 auto 16px; max-width: 440px; }
+.progress {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: var(--progress-track);
+  position: relative;
+}
+.progress .bar {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
+  transition: width 0.35s ease;
+  border-radius: 3px;
+  position: relative;
+}
+.progress .bar::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+  animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.progress-text {
+  margin-top: 8px; font-size: 12px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- log panel ---- */
+#log {
+  max-height: 160px;
+  overflow-y: auto;
+  text-align: left;
+  font-size: 11px;
+  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+  color: var(--text-muted);
+  background: var(--log-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  display: none;
+  margin-top: 14px;
+}
+#log.has-content { display: block; }
+
+/* ---- error panel ---- */
+#errorPanel {
+  display: none;
+  margin-top: 6px;
+  text-align: left;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  animation: fadeInUp 0.3s ease-out;
+}
+#errorPanel.visible { display: block; }
+#errorPanel.info { background: var(--info-bg); border-color: var(--info-border); }
+#errorPanel.info .error-icon { color: var(--info-icon); }
+#errorPanel.info #errorTitle { color: var(--info-text); }
+
+.error-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+  margin-bottom: 12px;
+}
+.error-icon svg { width: 18px; height: 18px; }
+#errorPanel.info .error-icon {
+  background: color-mix(in srgb, var(--info-icon) 12%, transparent);
+}
+#errorTitle { font-size: 15px; font-weight: 600; color: var(--error-text); margin-bottom: 6px; }
+#errorDetail {
+  font-size: 12px; color: var(--text-secondary); line-height: 1.6;
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 140px; overflow-y: auto;
+  margin-bottom: 14px;
+}
+
+.port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.port-row label { font-size: 13px; color: var(--text-secondary); }
+.port-row input {
+  width: 100px; padding: 6px 10px;
+  background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  font-size: 13px; outline: none;
+  transition: border-color 0.15s;
+}
+.port-row input:focus { border-color: var(--accent); }
+.port-row .hint { font-size: 11px; color: var(--text-muted); }
+
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.actions .act {
+  padding: 7px 16px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; border: 1px solid var(--border-strong);
+  background: var(--bg-card); color: var(--text);
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.actions .act:hover { background: var(--bg-hover); }
+.actions .act:active { transform: scale(0.97); }
+.actions .act.primary {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.actions .act.primary:hover { background: var(--accent-hover); }
+.actions .act.danger {
+  background: transparent; border-color: var(--error-border); color: var(--error);
+}
+.actions .act.danger:hover { background: color-mix(in srgb, var(--error) 8%, transparent); }
+
+.copy {
+  margin-top: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; border: 1px solid var(--border-strong);
+  background: transparent; color: var(--text-muted);
+  transition: color 0.15s, border-color 0.15s;
+}
+.copy:hover { color: var(--text); border-color: var(--accent); }
+
+/* ---- fade-in animation ---- */
+.box { animation: fadeInUp 0.4s ease-out; }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 </style>
 </head>
 <body>
   <div id="titlebar">
     <div class="drag"></div>
-    <div class="title">鲸港 WhaleHarbor</div>
-    <button class="btn" data-act="minimize" title="最小化">&#x2013;</button>
-    <button class="btn" data-act="toggleMaximize" title="最大化/还原">&#x25A1;</button>
-    <button class="btn close" data-act="close" title="关闭">&#x2715;</button>
+    <div class="title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12c0-5.5 4.5-10 10-10s10 4.5 10 10-4.5 10-10 10S2 17.5 2 12z"/><path d="M7 12c0-2.8 2.2-5 5-5s5 2.2 5 5-2.2 5-5 5-5-2.2-5-5z"/><circle cx="10" cy="10" r="1" fill="currentColor"/></svg>
+      鲸港 WhaleHarbor
+    </div>
+    <button class="btn" data-act="minimize" title="最小化">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+    </button>
+    <button class="btn" data-act="toggleMaximize" title="最大化/还原">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
+    </button>
+    <button class="btn close" data-act="close" title="关闭">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
   </div>
   <div class="body">
     <div class="box">
-      <div class="spinner" id="spinner"></div>
+      <!-- Whale logo with spinning ring -->
+      <div class="logo-wrap" id="logoWrap">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="whaleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:var(--accent-light);stop-opacity:1" />
+              <stop offset="100%" style="stop-color:var(--accent);stop-opacity:1" />
+            </linearGradient>
+          </defs>
+          <!-- Whale body -->
+          <path d="M8 36c0-10 8-18 20-18 10 0 18 5 22 12 2 3 6 4 6 4s-3 2-6 2c-1 6-6 12-16 12-10 0-20-4-22-10-.5-1-2-1.5-4-2z" fill="url(#whaleGrad)" opacity="0.9"/>
+          <!-- Whale eye -->
+          <circle cx="22" cy="28" r="2.5" fill="var(--bg)" />
+          <!-- Blowhole spray -->
+          <path d="M32 16c0-3 2-5 4-6M36 14c1-2 3-3 5-3" stroke="url(#whaleGrad)" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.5"/>
+          <!-- Tail -->
+          <path d="M52 34c3-2 6-2 8 0-2 2-5 3-8 2" fill="url(#whaleGrad)" opacity="0.7"/>
+        </svg>
+        <div class="logo-ring" id="logoRing"></div>
+      </div>
+
+      <div class="spinner hidden" id="spinner"></div>
       <h1>鲸港 WhaleHarbor</h1>
+      <div class="subtitle">DeepSeek Harness 桌面端</div>
       <div id="status">正在启动…</div>
+
       <div class="progress-wrap" id="progressWrap" hidden>
         <div class="progress"><div class="bar" id="progressBar"></div></div>
         <div class="progress-text" id="progressText"></div>
@@ -158,7 +403,9 @@
       <pre id="log"></pre>
 
       <div id="errorPanel">
-        <div class="error-icon">&#x26A0;</div>
+        <div class="error-icon" id="errorIconWrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+        </div>
         <div id="errorTitle"></div>
         <div id="errorDetail"></div>
         <div class="port-row" id="portRow" hidden>
@@ -171,14 +418,37 @@
       </div>
     </div>
   </div>
+
   <script>
     (function () {
       var bridge = window.dshDesktop;
-      if (!bridge) return; // not inside the desktop wrapper
+
+      // ---- theme: applied before bridge wiring so first paint is correct ----
+      function applyTheme(pref, systemDark) {
+        var dark;
+        if (pref === "dark") dark = true;
+        else if (pref === "light") dark = false;
+        else dark = systemDark; // "system" or unknown
+        document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      }
+
+      if (bridge) {
+        // Synchronous theme query available — set immediately.
+        var t = bridge.getThemeSync ? bridge.getThemeSync() : null;
+        if (t) applyTheme(t.preference, t.systemDark);
+      } else {
+        // No bridge (opened outside the shell) — follow the OS.
+        var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+        applyTheme("system", mq ? mq.matches : true);
+      }
+
+      if (!bridge) return;
 
       var statusEl = document.getElementById("status");
       var logEl = document.getElementById("log");
       var spinnerEl = document.getElementById("spinner");
+      var logoWrap = document.getElementById("logoWrap");
+      var logoRing = document.getElementById("logoRing");
       var progressWrap = document.getElementById("progressWrap");
       var progressBar = document.getElementById("progressBar");
       var progressText = document.getElementById("progressText");
@@ -192,13 +462,21 @@
         statusEl.classList.toggle("error", flag);
       }
 
-      // titlebar window controls
+      // ---- titlebar window controls ----
       document.querySelectorAll("#titlebar .btn").forEach(function (btn) {
         btn.addEventListener("click", function () {
           bridge.windowControl(btn.dataset.act);
         });
       });
 
+      // ---- live theme updates (when user toggles appearance in DSH settings) ----
+      if (bridge.onThemeChange) {
+        bridge.onThemeChange(function (t) {
+          if (t) applyTheme(t.preference, t.systemDark);
+        });
+      }
+
+      // ---- status / log / progress wiring ----
       bridge.onStatus(function (message) {
         statusEl.textContent = message;
         setErrorClass(/失败|错误|无法|超时|占用/.test(message));
@@ -211,7 +489,6 @@
         logEl.scrollTop = logEl.scrollHeight;
       });
 
-      // determinate download/install progress
       bridge.onProgress(function (p) {
         if (!p) return;
         progressWrap.hidden = false;
@@ -226,7 +503,7 @@
         }
       });
 
-      // startup / crash error panel — everything is in-page and copyable
+      // ---- startup / crash error panel ----
       var errorActions = document.getElementById("errorActions");
       var btnCopy = document.getElementById("btnCopy");
 
@@ -234,7 +511,10 @@
         if (!info) return;
         var isInfo = info.tone === "info";
         errorPanel.classList.toggle("info", isInfo);
-        document.querySelector("#errorPanel .error-icon").innerHTML = isInfo ? "&#x2139;" : "&#x26A0;";
+        // Swap the SVG icon: warning triangle (error) vs info circle
+        document.getElementById("errorIconWrap").innerHTML = isInfo
+          ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>'
+          : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
         errorTitle.textContent = info.message || "启动失败";
         errorDetail.textContent = info.detail || "";
         var hasChangePort = !!info.canChangePort;
@@ -261,12 +541,14 @@
         copyBaseLabel = isInfo ? "复制详情" : "复制错误信息";
         btnCopy.textContent = copyBaseLabel;
         errorPanel.classList.add("visible");
+        // Error state: hide the logo + spinner entirely, show a static error glyph
+        logoWrap.style.display = "none";
         spinnerEl.classList.add("hidden");
         statusEl.textContent = info.message || "启动失败";
         setErrorClass(!isInfo);
       });
 
-      // copy the full crash text (message + detail + live log) to the clipboard
+      // ---- copy error text ----
       var copyBaseLabel = "复制错误信息";
       btnCopy.addEventListener("click", function () {
         var text = errorTitle.textContent + "\n\n" + errorDetail.textContent +

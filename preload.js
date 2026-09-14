@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   copyText: (text) => ipcRenderer.send("dsh:copyText", text),
   // frameless window controls
   windowControl: (action) => ipcRenderer.send("dsh:window", action),
+  // ---- theme (appearance) ----
+  // Synchronous theme query for first paint: { preference, systemDark }.
+  getThemeSync: () => ipcRenderer.sendSync("dsh:getThemeSync"),
+  // Live theme push when the user changes appearance in DSH settings.
+  onThemeChange: (cb) => subscribe("dsh:theme", cb),
   // update feature (embedded DSH settings UI)
   getUpdateState: () => ipcRenderer.invoke("dsh:getUpdateState"),
   checkUpdate: () => ipcRenderer.invoke("dsh:checkUpdate"),

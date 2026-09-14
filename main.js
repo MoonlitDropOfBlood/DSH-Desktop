@@ -35,7 +35,7 @@
  * running core crashed on Windows), then restart the core with the new version.
  */
 
-const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeImage, powerSaveBlocker, Notification, clipboard, screen } = require("electron");
+const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeImage, powerSaveBlocker, Notification, clipboard, screen, nativeTheme } = require("electron");
 const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -2167,6 +2167,40 @@ function showFatal(message) {
 let latestKnown = null;
 let installInProgress = false;
 
+// ---- theme (appearance) ------------------------------------------------------
+/**
+ * Read DSH's ui-theme preference from <DSH_HOME>/settings.yaml.
+ * Returns "system" | "dark" | "light" (default "system" when unreadable).
+ * The file is tiny YAML; we parse just the ui-theme block without a YAML lib.
+ */
+function readDshThemePreference() {
+  try {
+    const yaml = fs.readFileSync(path.join(dshHomeDir(), "settings.yaml"), "utf8");
+    const m = yaml.match(/^ui-theme:\s*\n([\s\S]*?)(?=^\S|\n\S|\s*$)/m);
+    if (!m) return "system";
+    const p = m[1].match(/^\s+preference:\s*(\S+)/m);
+    if (!p) return "system";
+    const v = p[1].trim().replace(/["']/g, "");
+    return v === "dark" || v === "light" ? v : "system";
+  } catch {
+    return "system";
+  }
+}
+
+/** Current resolved theme: { preference, dark } sent to the splash page. */
+function currentTheme() {
+  const preference = readDshThemePreference();
+  // nativeTheme.shouldUseDarkColors already resolves "system" against the OS.
+  nativeTheme.themeSource = preference === "system" ? "system" : preference;
+  return { preference, systemDark: nativeTheme.shouldUseDarkColors };
+}
+
+/** Push the current theme to the splash window (fire-and-forget). */
+function pushTheme() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("dsh:theme", currentTheme());
+}
+
 /** Path to the persisted shell settings (update + tray toggles). */
 function settingsPath() {
   return path.join(app.getPath("userData"), "update-settings.json");
@@ -3504,13 +3538,16 @@ function relaunchApp() {
 // ---- window / UI -----------------------------------------------------------
 function createWindow() {
   const iconPath = path.join(__dirname, "build", "icon.png");
+  // Resolve the theme BEFORE creating the window so backgroundColor matches.
+  const theme = currentTheme();
+  const bgColor = theme.systemDark ? "#0b1120" : "#f0f2f5";
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 960,
     minHeight: 620,
     title: APP_NAME,
-    backgroundColor: "#0b1120",
+    backgroundColor: bgColor,
     show: false,
     // Taskbar icon (the DeepSeek whale tile); the packaged shortcut icon comes
     // from electron-builder's win.icon (the same PNG, auto-converted to .ico).
@@ -3530,6 +3567,12 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, "splash.html"));
   mainWindow.once("ready-to-show", () => mainWindow.show());
+
+  // Push the resolved theme to the splash as soon as its preload is ready.
+  mainWindow.webContents.on("did-finish-load", () => {
+    const url = (() => { try { return mainWindow.webContents.getURL(); } catch { return ""; } })();
+    if (url.startsWith("file:")) pushTheme();
+  });
 
   // If the DSH page fails to load (core down, plugin/bundle failure, port
   // misroute), fall back to the splash so the window controls + retry/quit
@@ -3613,6 +3656,12 @@ ipcMain.on("dsh:window", (_event, action) => {
   } else if (action === "close") {
     mainWindow.close();
   }
+});
+
+// Synchronous theme query for the splash page's first paint (avoids a flash
+// of the wrong palette). Called from preload before any async channel is up.
+ipcMain.on("dsh:getThemeSync", (event) => {
+  event.returnValue = currentTheme();
 });
 
 // ---- update IPC (driven by the embedded DSH settings UI) -------------------
