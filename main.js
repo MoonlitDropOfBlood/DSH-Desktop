@@ -54,6 +54,19 @@ const DEFAULT_PORT = 3080;
 const APP_NAME = "鲸港 WhaleHarbor";
 /** GitHub repo that hosts the shell's own releases (owner/repo). */
 const SHELL_REPO = process.env.DSH_DESKTOP_SHELL_REPO || "MoonlitDropOfBlood/DSH-Desktop";
+/** GitHub API / release-download mirror prefixes (trailing slash REQUIRED),
+ *  used ONLY as fallback when github.com is unreachable (国内网络). These are
+ *  community transparent proxies — never trust them with unverified binaries:
+ *  the shell installer downloaded through a mirror is still checked against
+ *  nothing today (GitHub asset digests are not exposed here), so mirrors are
+ *  attempted strictly in order and any HTTP failure moves to the next source.
+ *  Set DSH_DESKTOP_SHELL_MIRRORS to a comma-separated list to override, or to
+ *  an empty string to disable mirrors entirely. 方案 A (self-hosted OSS
+ *  latest.json + direct links) lands by pointing DSH_DESKTOP_SHELL_REPO /
+ *  these mirrors at our own infrastructure. */
+const SHELL_MIRRORS = process.env.DSH_DESKTOP_SHELL_MIRRORS !== undefined
+  ? process.env.DSH_DESKTOP_SHELL_MIRRORS.split(",").map((s) => s.trim()).filter(Boolean)
+  : ["https://gh-proxy.com/"];
 /** npm dist-tag channels for the DSH core update (设置「核心」→「更新渠道」).
  *  稳定版 = latest / 体验版 = next / 实验版 = alpha. Tags are MOVING pointers —
  *  each resolves to whatever the registry currently pins, and a channel that
@@ -3753,37 +3766,49 @@ function compareVersions(a, b) {
   return 0;
 }
 
-/** Query the latest GitHub release of the shell. cb(infoOrNull). */
+/** Query the latest GitHub release of the shell. cb(infoOrNull).
+ *  Tries the API directly, then each mirror prefix in SHELL_MIRRORS, so the
+ *  update check still works when github.com is unreachable (国内网络). */
 function queryShellLatest(cb) {
-  const url = `https://api.github.com/repos/${SHELL_REPO}/releases/latest`;
-  const req = https.get(url, {
-    headers: { "User-Agent": APP_NAME, Accept: "application/vnd.github+json" }
-  }, (res) => {
-    let body = "";
-    res.setEncoding("utf8");
-    res.on("data", (c) => { body += c; });
-    res.on("end", () => {
-      if (res.statusCode !== 200) { cb(null); return; }
-      try {
-        const json = JSON.parse(body);
-        const assets = Array.isArray(json.assets) ? json.assets : [];
-        cb({
-          tag: json.tag_name,
-          version: String(json.tag_name || "").replace(/^v/i, ""),
-          url: json.html_url || `https://github.com/${SHELL_REPO}/releases`,
-          assets: assets.map((a) => ({
-            name: a.name,
-            size: a.size || 0,
-            browser_download_url: a.browser_download_url
-          }))
-        });
-      } catch {
-        cb(null);
-      }
+  const candidates = [
+    `https://api.github.com/repos/${SHELL_REPO}/releases/latest`,
+    ...SHELL_MIRRORS.map((m) => `${m}https://api.github.com/repos/${SHELL_REPO}/releases/latest`),
+  ];
+  const attempt = (i) => {
+    if (i >= candidates.length) { cb(null); return; }
+    const req = https.get(candidates[i], {
+      headers: { "User-Agent": APP_NAME, Accept: "application/vnd.github+json" }
+    }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => { body += c; });
+      res.on("end", () => {
+        if (res.statusCode !== 200) { attempt(i + 1); return; }
+        try {
+          const json = JSON.parse(body);
+          const assets = Array.isArray(json.assets) ? json.assets : [];
+          cb({
+            tag: json.tag_name,
+            version: String(json.tag_name || "").replace(/^v/i, ""),
+            url: json.html_url || `https://github.com/${SHELL_REPO}/releases`,
+            assets: assets.map((a) => ({
+              name: a.name,
+              size: a.size || 0,
+              browser_download_url: a.browser_download_url
+            }))
+          });
+        } catch {
+          attempt(i + 1);
+        }
+      });
     });
-  });
-  req.setTimeout(15000, () => { req.destroy(); cb(null); });
-  req.on("error", () => cb(null));
+    // 30s per source: community proxies can be slow but alive (gh-proxy.com
+    // measured ~17s cold) — a tighter timeout false-negatives the only
+    // working fallback when github.com is unreachable.
+    req.setTimeout(30000, () => { req.destroy(); attempt(i + 1); });
+    req.on("error", () => attempt(i + 1));
+  };
+  attempt(0);
 }
 
 /** Pick the installer asset matching the current platform/arch. */
@@ -3890,25 +3915,39 @@ ipcMain.handle("dsh:downloadShellUpdate", () => new Promise((resolve) => {
       return;
     }
     const dest = path.join(app.getPath("temp"), asset.name);
+    // 多源兜底：GitHub 直链 -> 各镜像前缀。任一源失败（超时/非 200）自动切下一个。
+    const sources = [
+      asset.browser_download_url,
+      ...SHELL_MIRRORS.map((m) => m + asset.browser_download_url),
+    ];
     log(`downloading shell ${info.version}: ${asset.name}`);
     sendShellProgress({ percent: 0, downloadedMB: 0, totalMB: (asset.size || 0) / 1024 / 1024 });
-    downloadFile(asset.browser_download_url, dest, (got, total) => {
-      sendShellProgress({
-        percent: total ? Math.round((got / total) * 100) : 0,
-        downloadedMB: got / 1024 / 1024,
-        totalMB: total / 1024 / 1024
-      });
-    }, (err) => {
-      if (err) {
-        log(`shell download failed: ${err.message}`);
-        sendShellProgress({ error: err.message });
-        resolve({ ok: false, error: err.message });
+    const attempt = (i) => {
+      if (i >= sources.length) {
+        const errText = "所有下载源均失败（GitHub 与镜像均不可达），请检查网络后重试";
+        log(`shell download failed: ${errText}`);
+        sendShellProgress({ error: errText });
+        resolve({ ok: false, error: errText });
         return;
       }
-      sendShellProgress({ percent: 100, phase: "done" });
-      launchShellInstaller(dest);
-      resolve({ ok: true, file: dest });
-    });
+      downloadFile(sources[i], dest, (got, total) => {
+        sendShellProgress({
+          percent: total ? Math.round((got / total) * 100) : 0,
+          downloadedMB: got / 1024 / 1024,
+          totalMB: total / 1024 / 1024
+        });
+      }, (err) => {
+        if (err) {
+          log(`shell download via ${sources[i]} failed: ${err.message}`);
+          attempt(i + 1);
+          return;
+        }
+        sendShellProgress({ percent: 100, phase: "done" });
+        launchShellInstaller(dest);
+        resolve({ ok: true, file: dest });
+      });
+    };
+    attempt(0);
   });
 }));
 

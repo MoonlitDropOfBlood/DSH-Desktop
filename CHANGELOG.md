@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-09-15
+
+### 修复
+
+- **壳「检查更新」在国内网络下误报「无法获取最新版本」**：根因是 GitHub API 直连瞬时不可达时，兜底镜像链路太弱——唯一活着的 gh-proxy.com 实测冷启动约 17s，超过代码里每源 15s 的超时（被误杀），ghproxy.net 则早已恒定 403。两处加固：
+  - **移除失效镜像 ghproxy.net**：默认 `SHELL_MIRRORS` 只保留 `https://gh-proxy.com/`（仍可用 `DSH_DESKTOP_SHELL_MIRRORS` 覆盖，空串禁用镜像）。
+  - **壳更新链路每源超时 15s → 30s**（`queryShellLatest` 逐源探测 + `dsh:downloadShellUpdate` 逐源下载）：社区代理慢但可用，过紧的超时会把唯一可用的兜底源误判为失败。
+
+### 变更
+
+- **壳自身更新链路同步多源兜底**（`main.js`）：`queryShellLatest` 从「GitHub 直连单源」改为「直连 → 各镜像前缀逐源尝试」，`dsh:downloadShellUpdate` 同样按「GitHub 直链 → 镜像」顺序逐源下载，任一源超时/非 200 自动切下一个，全部失败才报「所有下载源均失败」。
+
 ## [1.9.0] - 2026-09-14
 
 ### 变更
