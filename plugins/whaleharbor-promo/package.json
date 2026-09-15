@@ -1,0 +1,31 @@
+{
+  "name": "whaleharbor-promo",
+  "version": "1.0.0",
+  "description": "WhaleHarbor web onboarding: lite-client standalone window (--app), background installer download with mirror fallback + SHA-256 verify, browser task notifications, and a full-version install prompt.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MoonlitDropOfBlood/DSH-Desktop.git",
+    "directory": "plugins/whaleharbor-promo"
+  },
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}

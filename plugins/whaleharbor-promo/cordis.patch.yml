@@ -1,0 +1,6 @@
+# whaleharbor-promo bundle patch — mounted by `dsh plugin add` via the
+# dsh.bundle manifest in package.json. `insert` takes a LIST (writing `insert:`
+# with a single inline mapping kills the core boot with exit 1).
+- insert:
+    - id: whaleharbor-promo
+      name: whaleharbor-promo

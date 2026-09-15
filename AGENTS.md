@@ -146,6 +146,17 @@ window.__ModuleLoader__.load({
 - **核心 ≥0.1.2 会自动挂载 profile node_modules 里的包（大坑，2026-09-04 e2e 实测）**：壳暂存的 dshmarket 拷贝会被新核心自己mount成 loader 条目，此时 patch 里的 `- insert:` 行就成了第二条 → `duplicate loader entry id: dsh-market` 启动崩。所以 `prepareBundledMarket()` 在 `coreAutoMountsProfilePackages()`（装到的核心 ≥0.1.2）时返回 `"staged-auto"`，`prepareDesktopPlugin()` 照 `"user"` 模式发**覆盖行**（`- id:` 找到核心自动建的条目改 config，正好把 `allowRestart: false` 附上）；0.1.1.x 不自动挂载，维持 `- insert:`。**别把这个版本门禁合并成无条件覆盖行**——0.1.1.x 上自动挂载不存在，覆盖行找不到目标只会静默跳过，市场就消失了。
 - profile 的 node_modules 可能被 pnpm 管理，pnpm prune 会清掉壳暂存的"外来"拷贝——无妨，下次 spawn DSH 会重新暂存（自愈）。
 
+### 2c. 鲸港 Web 引导插件（whaleharbor-promo，仓库目录 `plugins/whaleharbor-promo/`）
+
+把普通浏览器里的 DSH 会话变成"鲸港简版客户端"，同时后台下载完整安装包并提示安装（Web → Desktop 的转化漏斗）。**不经 Electron 打包分发**（不在 electron-builder `files` 里），作为 profile 插件经 awesome-dsh-plugin 收录 + dshmarket 分发。放 `plugins/` 子目录是 awesome CI 的硬要求（它只扫根包和 `packages/`·`plugins/`·`apps/` 子包的 `package.json`）。结构与 `dsh-desktop-plugin/` 相同：`index.js`（Host）+ `client.js`（Client bundle）+ `package.json` + **`cordis.patch.yml`**。
+
+- **`dsh.bundle` 清单是收录门槛（大坑，勿删）**：`package.json` 必须声明 `"dsh": { "bundle": { "patch": "./cordis.patch.yml" }, "client": { "platform": "web" } }`——只声明 `dsh.client` 会被 awesome CI 拒（"that alone is not installable"）。`cordis.patch.yml` 随包，内容就是挂载行（`- insert:` **值是列表**，写成单映射会让核心启动 exit 1，见 §2）。发 npm 时 `repository` 字段必须指回 DSH-Desktop 仓库（awesome 的 npm↔仓库映射靠它关联）。
+- **三段式流程**：① 普通标签页打开时 Host 用本机浏览器（win: Chrome/Edge/Brave 常见安装路径 + `where` 兜底；mac: `/Applications`+`~/Applications` 的 .app；linux: `which`）spawn `--app=<当前页 URL>` 独立窗口（无浏览器 UI），只自动开一次（localStorage `whprom.appOpened`）；② 独立窗口内 Client 渲染简版客户端顶栏（`shell.overlay` 顶部胶囊：品牌/下载进度 chip/浏览器任务通知开关/全屏/收起）+ 右下角引导卡（`shell.overlay`，CSS 画的客户端预览 + 真实下载状态机），侧栏底部"客户端"按钮可重开；③ Host 后台下载完整安装包到 `<home>/Downloads`：发布元信息 `[WHPROMO_RELEASE_JSON(自有 OSS latest.json，方案A槽位) → GitHub API → gh-proxy.com 镜像]`，二进制 `[browser_download_url → 镜像]` 顺序兜底，单请求超时 30s（gh-proxy 冷启动实测 ~17s，15s 会误杀唯一可用兜底——v1.9.1 壳更新同款教训），下完用 `crypto` 对 GitHub 资产的 `digest` 做 SHA-256 校验，完成后引导卡强制弹一次"完整功能需要安装客户端"（`whprom.donePrompted` 只弹一次）+ `explorer /select` 定位。**镜像默认只有 gh-proxy.com**：ghproxy.net 实测恒定 403（v1.9.1 已把它从 `SHELL_MIRRORS` 移除，插件与之对齐）。
+- **Client→Host 通道**：profile 插件没有动态插件的 `host.call`，Host 起 `127.0.0.1:<random>` HTTP 服务（每运随机 token，`x-wh-promo-token` 头校验 + CORS `*`），经 `webServer.tapIndex` 把 `{port, token}` 注入每个 index 页 `window.__WH_PROMO__`；Client 轮询 `/state`（1s）与 `/notify`（3s）。**无 host→client 推送通道**，任务通知（agent/status、agent/error、approval/request，同样只报主 agent）走轮询 + 浏览器 `Notification` API。
+- **环境门禁**：`window.dshDesktop` 存在（已在完整客户端里）→ 全部 UI no-op；`matchMedia('(display-mode: standalone)')` 为真（`--app` 窗口）→ 渲染顶栏，标签页只渲染引导卡 + "以独立窗口打开" CTA。**认证 token 注意**：`--app` 用 Client 的 `location.href` 原样打开，首次启动的 `?token=…` 能带过去；标签页认证后 cookie 在 profile 里，换浏览器会遇 "authentication required" 页（属正常，按提示重开打印的 URL）。
+- **CLI 子命令不可扩展**：`dsh` 的子命令在核心 `bin.js` 里 commander 硬编码（`web`/`plugin`），解析早于插件加载；插件能注册的是 UI 斜杠命令（`commands` 服务），本项目已决定不用。
+- **壳自身更新链路同步多源（main.js）**：`SHELL_MIRRORS`（`DSH_DESKTOP_SHELL_MIRRORS` 覆盖，空串禁用）+ `queryShellLatest` 逐源尝试 API + `dsh:downloadShellUpdate` 逐源尝试下载。方案 A 落地后把自有 OSS 前缀加进 `SHELL_MIRRORS` 即可。
+
 ### 3. Electron ↔ DSH 通信（三条通道）
 
 | 通道 | 方向 | 用途 |
