@@ -13,3 +13,5 @@ build/pnpm/
 !scripts/.testdata/*.log
 *.tgz
 .isolated-run/
+
+.npm-cache-tmp/
