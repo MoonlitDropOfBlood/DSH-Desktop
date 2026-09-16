@@ -24,7 +24,7 @@
  *   node scripts/fetch-market-plugin.js
  *
  * Env:
- *   DSH_DESKTOP_MARKET_VERSION — dshmarket version to fetch (default: 1.15.0)
+ *   DSH_DESKTOP_MARKET_VERSION — dshmarket version to fetch (default: 1.47.0)
  *   DSH_DESKTOP_NPM_REGISTRY   — npm registry (default: npmmirror, 国内快)
  *   DSH_DESKTOP_NPM_CACHE      — npm cache dir (default: npm's own cache)
  *
@@ -36,7 +36,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const VERSION = process.env.DSH_DESKTOP_MARKET_VERSION || "1.15.0";
+const VERSION = process.env.DSH_DESKTOP_MARKET_VERSION || "1.47.0";
 const REGISTRY = process.env.DSH_DESKTOP_NPM_REGISTRY || "https://registry.npmmirror.com";
 const OUT = path.join(__dirname, "..", "build", "market-plugin");
 /** npm's prefix for the install; its node_modules is moved into OUT afterwards. */
@@ -94,6 +94,17 @@ function main() {
     if (!fs.existsSync(path.join(OUT, pkg, "package.json"))) {
       throw new Error(`build/market-plugin is missing ${pkg} — npm layout changed?`);
     }
+  }
+  // Trim everything we did NOT whitelist. npm hoists the dshmarket peer chain
+  // (cordis → cosmokit → schemastery → @standard-schema/spec) up to the same
+  // level even though the runtime resolves them against the core install
+  // directory — main.js never stages those into the profile, so shipping them
+  // inside app.asar is dead weight AND a footgun: any future tweak that copies
+  // them would land a parallel core-package copy in node_modules.
+  const keep = new Set(EXPECTED);
+  for (const entry of fs.readdirSync(OUT)) {
+    if (keep.has(entry)) continue;
+    fs.rmSync(path.join(OUT, entry), { recursive: true, force: true });
   }
   log(`staged dshmarket@${stagedVersion()} (+${EXPECTED.slice(1).join("/")})`);
 }

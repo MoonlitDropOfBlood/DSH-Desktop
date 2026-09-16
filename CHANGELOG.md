@@ -6,7 +6,12 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
-## [Unreleased]
+## [1.9.2] - 2026-09-16
+
+### 变更
+
+- **内置插件市场 dshmarket pin 升级 1.15.0 → 1.47.0**：1.47.0 要求 `@deepseek-ai/cordis` ≥4.0.1、`@deepseek-ai/dsh-settings` ≥0.1.1-rc.2 / 0.1.2-alpha.2 / 0.1.0-rc.7（peer）——1.15.0 与最新 DSH 核心存在 peer 区间错配，装上后插件启动期即抛 peer 警告且 UI primitives 注入失败。`scripts/fetch-market-plugin.js` 默认版本与文档同步；运行时闭包随版本变化新增 `argparse`，仍在白名单内。
+- **fetch-market-plugin 显式 trim 非白名单包**：npm 把 dshmarket 的 peer 链（`@deepseek-ai/cordis` → `@deepseek-ai/cosmokit` → `@deepseek-ai/schemastery` → `@standard-schema/spec`）提升到顶层，运行时由 DSH 核心目录解析（`main.js` 的 `prepareBundledMarket` 已只 stage 4 个白名单包，不拷 peer）。为避免多余 `@deepseek-ai/*` 占用 asar 体积 ~1MB 并把"第二实例"风险关到门外，`fetch-market-plugin.js` 在 flatten 后立即删除白名单外的目录。
 
 ## [1.9.1] - 2026-09-15
 

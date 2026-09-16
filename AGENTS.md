@@ -356,7 +356,7 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_NODE_VERSION` | `scripts/fetch-node.js` 下载的内置 Node 版本（默认 24.19.0，Node 24 LTS，≥核心 22.15 门槛） |
 | `DSH_DESKTOP_NODE_MIRROR` | 内置 Node 二进制镜像（默认 npmmirror，回退 nodejs.org） |
 | `DSH_DESKTOP_NPM` | 覆盖 npm 回退路径要 spawn 的 npm 可执行文件绝对路径（仅 pnpm 缺失的回退时用） |
-| `DSH_DESKTOP_MARKET_VERSION` | `scripts/fetch-market-plugin.js` 下载的 dshmarket 版本（默认 1.15.0） |
+| `DSH_DESKTOP_MARKET_VERSION` | `scripts/fetch-market-plugin.js` 下载的 dshmarket 版本（默认 1.47.0） |
 | `DSH_DESKTOP_PNPM_VERSION` | `scripts/fetch-pnpm.js` 下载的内置 pnpm 版本（默认 10.33.0） |
 | `DSH_DESKTOP_INSTALLER` | 强制核心安装器：`npm` / `pnpm`（默认自动：更新目标 ≥0.1.2 用 npm，其余 pnpm；见"9c. 安装器选择"） |
 | `DSH_DESKTOP_SMOKE_SECONDS` | 更新冒烟启动的判定秒数（默认 90s；生产绝不设置，e2e 用极小值强制冒烟失败验证回滚） |
