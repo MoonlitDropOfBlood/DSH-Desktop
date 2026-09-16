@@ -1,6 +1,7 @@
 # whaleharbor-promo bundle patch — mounted by `dsh plugin add` via the
 # dsh.bundle manifest in package.json. `insert` takes a LIST (writing `insert:`
 # with a single inline mapping kills the core boot with exit 1).
+# id 不带 scope；name 是 node_modules 里的完整包名（与已收录的 dsh-git-manager 同格式）。
 - insert:
     - id: whaleharbor-promo
-      name: whaleharbor-promo
+      name: '@duke-dsh-plugins/whaleharbor-promo'

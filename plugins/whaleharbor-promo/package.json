@@ -1,8 +1,12 @@
 {
-  "name": "whaleharbor-promo",
+  "name": "@duke-dsh-plugins/whaleharbor-promo",
   "version": "1.0.0",
   "description": "WhaleHarbor web onboarding: lite-client standalone window (--app), background installer download with mirror fallback + SHA-256 verify, browser task notifications, and a full-version install prompt.",
   "main": "index.js",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "files": [
     "index.js",
     "client.js",

@@ -1,4 +1,4 @@
-# whaleharbor-promo
+# @duke-dsh-plugins/whaleharbor-promo
 
 鲸港 Web 引导插件：把普通浏览器里的 DSH 会话变成「鲸港简版客户端」（独立窗口），同时后台下载完整桌面安装包并提示安装（Web → Desktop 转化漏斗）。
 
@@ -18,7 +18,7 @@
 包内自带 `dsh.bundle` 清单（`cordis.patch.yml` 随包挂载），一条命令即可：
 
 ```bash
-dsh plugin --profile web add whaleharbor-promo   # npm 发布前也可直接指向本目录/GitHub 安装
+dsh plugin --profile web add @duke-dsh-plugins/whaleharbor-promo
 ```
 
 或在 dshmarket 插件市场里一键安装。
