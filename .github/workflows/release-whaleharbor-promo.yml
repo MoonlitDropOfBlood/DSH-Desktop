@@ -1,0 +1,99 @@
+name: Release whaleharbor-promo
+
+# 与兄弟插件（dsh-whale-pet / dsh-git-manager 等）的 release.yml 同款流程：
+# 打插件自己的版本标签时打包 tgz、幂等发布 npm（OIDC Trusted Publishing）、发布 GitHub Release。
+# 标签用 whaleharbor-promo-v* 前缀——DSH-Desktop 的 build-installers.yml 已占用裸 v*（桌面壳安装包），
+# 避免互相触发。
+#
+# npm 发布走 OIDC Trusted Publishing（无静态 token / 无 OTP，Node 24 自带 npm 11，满足 >=11.5.1）。
+# 需先在 npmjs.com 包设置里配置 trusted publisher：
+#   repo = MoonlitDropOfBlood/DSH-Desktop
+#   workflow = .github/workflows/release-whaleharbor-promo.yml
+# 已存在于 npm 的版本会跳过 publish（首版可先用本机 token 发布 bootstrap，
+# 之后的 whaleharbor-promo-v* 标签全自动）。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "whaleharbor-promo-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Package tarball
+        run: npm pack
+        working-directory: plugins/whaleharbor-promo
+        env:
+          npm_config_package_lock: "false"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-tarball
+          path: plugins/whaleharbor-promo/*.tgz
+
+  publish-npm:
+    name: Publish to npm (Trusted Publishing)
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Skip when this version is already on npm
+        id: check
+        run: |
+          cd plugins/whaleharbor-promo
+          PKG=$(node -p "require('./package.json').name + '@' + require('./package.json').version")
+          if npm view "$PKG" version --registry=https://registry.npmjs.org 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish
+        if: steps.check.outputs.exists == 'false'
+        run: npm publish
+        working-directory: plugins/whaleharbor-promo
+
+  release:
+    name: Publish GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## ${{ github.ref_name }}
+
+            @duke-dsh-plugins/whaleharbor-promo — 鲸港 Web 引导插件：把普通浏览器里的 DSH 会话变成「简版客户端」（浏览器 --app 独立窗口 + 客户端顶栏 + 任务通知），后台多源下载完整桌面安装包（gh-proxy 兜底 + SHA-256 校验）并提示安装。
+
+            ### 📦 安装
+            ```bash
+            dsh plugin --profile web add @duke-dsh-plugins/whaleharbor-promo
+            ```
+            或使用本 Release 附件中的 tgz 包安装。装完**必须重启 DSH** 生效。
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
