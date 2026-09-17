@@ -312,6 +312,11 @@ window.__ModuleLoader__.load({
 		// authoritative; live DOM markers (the legacy capsule class / the 0.1.5
 		// corner attribute / the rightbar panel attribute) are the fallback
 		// while the version promise is still resolving.
+		// TODO(retire-legacy): once the minimum supported core rises to ≥0.1.5,
+		// delete the whole LEGACY path (~250 lines): SessionLogButton + the 44px
+		// .dsh-desktop-btn CSS + the sessionLogButton hide rule + this DOM
+		// fallback (placementStore collapses to a constant MODERN). Until then
+		// §4 keeps LEGACY exactly as-is.
 		const PLACEMENT = { LEGACY: "legacy", MODERN: "modern" };
 		function isModernVersion(v) {
 			const m = typeof v === "string" ? /^(\d+)\.(\d+)\.(\d+)/.exec(v) : null;
@@ -573,22 +578,60 @@ window.__ModuleLoader__.load({
 		}
 
 		// ---- 2. sidebar update badge -------------------------------------------
+		// Two-click confirm on BOTH badges: an accidental single click used to
+		// kill the whole session for a core-update install. The confirm window
+		// auto-expires after 10s. The shell (鲸港) update shares the badge slot
+		// with a quieter style — the core update always wins when both exist.
 		function UpdateBadge(props) {
 			const state = useUpdateState();
+			const [confirming, setConfirming] = React.useState(false);
+			const confirmTimer = React.useRef(0);
+			React.useEffect(() => () => clearTimeout(confirmTimer.current), []);
+			const armConfirm = () => {
+				setConfirming(true);
+				clearTimeout(confirmTimer.current);
+				confirmTimer.current = setTimeout(() => setConfirming(false), 10000);
+			};
+			const disarm = () => {
+				clearTimeout(confirmTimer.current);
+				setConfirming(false);
+			};
 			if (!hasBridge("getUpdateState")) return null;
 			if (props && props.wide === false) return null; // rail-collapsed sidebar
-			if (!state || !state.updateAvailable || state.autoUpdate) return null;
-			return React.createElement(
-				Button,
-				{
+			if (!state || state.autoUpdate) return null; // autoUpdate: core updates flow silently
+
+			// 鲸港 self-update: click twice → download the installer and launch it
+			// (progress shows in the 桌面版 settings section).
+			if (!state.updateAvailable && state.shellUpdateAvailable && hasBridge("downloadShellUpdate")) {
+				return React.createElement(Button, {
 					variant: "outline",
 					size: "sm",
-					className: "dsh-desktop-update-badge",
-					title: `发现新版本 ${state.latest}（当前 ${state.installed}），点击更新`,
-					onClick: () => { if (hasBridge("installUpdate")) bridge().installUpdate(); }
-				},
-				`有新版 ${state.latest || ""}`
-			);
+					className: "dsh-desktop-update-badge is-shell" + (confirming ? " is-confirm" : ""),
+					title: confirming
+						? "再次点击下载并安装（误触保护）"
+						: `鲸港新版本 ${state.shellLatestVersion || ""}（当前 ${state.shellVersion || ""}），点击两次下载安装`,
+					onClick: () => {
+						if (!confirming) { armConfirm(); return; }
+						disarm();
+						if (hasBridge("downloadShellUpdate")) bridge().downloadShellUpdate().catch(() => {});
+					}
+				}, confirming ? `再次点击装 ${state.shellLatestVersion || ""}` : `鲸港新版 ${state.shellLatestVersion || ""}`);
+			}
+
+			if (!state.updateAvailable) return null;
+			return React.createElement(Button, {
+				variant: "outline",
+				size: "sm",
+				className: "dsh-desktop-update-badge" + (confirming ? " is-confirm" : ""),
+				title: confirming
+					? "再次点击确认安装（误触保护，会先停止核心）"
+					: `发现新版本 ${state.latest}（当前 ${state.installed}），点击更新`,
+				onClick: () => {
+					if (!confirming) { armConfirm(); return; }
+					disarm();
+					if (hasBridge("installUpdate")) bridge().installUpdate();
+				}
+			}, confirming ? "再次点击确认安装" : `有新版 ${state.latest || ""}`);
 		}
 
 		// ---- 3. settings sections ----------------------------------------------
@@ -1051,6 +1094,12 @@ window.__ModuleLoader__.load({
 /* Green update badge (a DSH outline Button re-tinted green). */
 .dsh-desktop-update-badge { border-color: #22c55e !important; color: #22c55e !important; }
 .dsh-desktop-update-badge:hover { background: rgba(34,197,94,0.12) !important; }
+/* Confirm-armed state (second-click protection window). */
+.dsh-desktop-update-badge.is-confirm { border-color: #d29922 !important; color: #d29922 !important; }
+.dsh-desktop-update-badge.is-confirm:hover { background: rgba(210,153,34,0.12) !important; }
+/* 鲸港 self-update variant: quieter neutral tint (core update keeps green). */
+.dsh-desktop-update-badge.is-shell { border-color: rgba(127,127,127,0.55) !important; color: inherit !important; }
+.dsh-desktop-update-badge.is-shell:hover { background: rgba(127,127,127,0.12) !important; }
 
 /* Settings section layout. */
 .dsh-desktop-settings { padding: 16px; display: flex; flex-direction: column; gap: 14px; color: var(--dsw-alias-label-secondary); font-size: 13px; }

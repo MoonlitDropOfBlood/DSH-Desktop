@@ -3210,6 +3210,10 @@ function pushUpdateState() {
     // switch back (alpha → latest) must not flag an OLDER core as updatable —
     // the old `latest !== installed` let auto-update silently downgrade.
     updateAvailable: Boolean(installed && latestKnown && isNewer(latestKnown, installed)),
+    // 鲸港 self-update hint (sidebar badge): fed by the silent background
+    // check and by manual 检查更新 in the settings page.
+    shellUpdateAvailable: Boolean(shellUpdateInfo),
+    shellLatestVersion: shellUpdateInfo ? shellUpdateInfo.version : null,
     // False = the local RPC bridge never came up (task notifications, tray
     // contributions and float windows are dead); the settings UI shows a hint.
     notifyBridgeOk: Boolean(notifyServer)
@@ -3840,6 +3844,26 @@ function shellVersionCurrent() {
   return app.getVersion();
 }
 
+/** Last known shell (鲸港) update, from the silent background check or a
+ *  manual 检查更新 in the settings page — feeds the sidebar badge hint. */
+let shellUpdateInfo = null;
+
+/** Silent background shell-update check: no panel, no toast — just keeps the
+ *  sidebar hint current. Runs ~1min after boot, then every 12h. */
+function checkShellUpdateSilent() {
+  if (isQuitting || isUpdating) return;
+  queryShellLatest((info) => {
+    if (!info) return;
+    const has = compareVersions(info.version, shellVersionCurrent()) > 0;
+    const next = has ? { version: info.version } : null;
+    if (Boolean(next) !== Boolean(shellUpdateInfo)
+      || (next && shellUpdateInfo && next.version !== shellUpdateInfo.version)) {
+      shellUpdateInfo = next;
+      pushUpdateState();
+    }
+  });
+}
+
 /** Compare two dotted SHELL versions (v1.2.3 tags, no prereleases); >0 if a
  *  is newer than b. DSH CORE versions must go through core-version.js instead
  *  — this one is prerelease-insensitive, fine only for the shell's plain tags. */
@@ -3989,7 +4013,10 @@ ipcMain.handle("dsh:checkShellUpdate", () => new Promise((resolve) => {
       return;
     }
     const has = compareVersions(info.version, shellVersionCurrent()) > 0;
+    // Badge sync: a manual check here also feeds the sidebar shell-update hint.
+    shellUpdateInfo = has ? { version: info.version } : null;
     const asset = has ? shellAssetForPlatform(info.assets) : null;
+    pushUpdateState();
     resolve({
       shellCurrent: shellVersionCurrent(),
       shellLatest: info.version,
@@ -4286,6 +4313,11 @@ app.whenReady().then(() => {
   // window from the tray.
   if (readSettings().closeToTray) ensureTray();
   setTimeout(checkForUpdatesOnStartup, 8000); // non-blocking, after boot kicks off
+  // 鲸港 shell self-update: a silent background check keeps the sidebar badge
+  // hint current (the settings page stays the on-demand entry). ~1min after
+  // boot, then every 12h.
+  setTimeout(checkShellUpdateSilent, 60000);
+  setInterval(checkShellUpdateSilent, 12 * 60 * 60 * 1000);
 
   // A second launch arrived while this instance was still booting: make sure
   // the (now created) window comes to the front.

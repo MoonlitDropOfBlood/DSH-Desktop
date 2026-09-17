@@ -23,7 +23,7 @@
 
 **DSH 核心不打进安装包**：目标机器首次启动时自动通过内置 pnpm 安装最新版 DSH，之后直接复用本机已有的完整安装——既保持轻量，又能随时更新到最新。
 
-**零依赖运行**：DSH 核心直接跑在 Electron 内嵌的 Node 运行时上（`ELECTRON_RUN_AS_NODE`），核心的安装/更新用内置 pnpm——最终用户机器上**不需要安装 node/npm**。（注：MCP 子进程依赖用户 PATH 里的 node/npx，常规开发机均满足。）
+**零依赖运行**：DSH 核心跑在应用**内置的独立 Node 24 运行时**上（真实的 Console 子系统 node.exe，随安装包分发，保证 Windows 下整棵进程树无弹窗），Electron 内嵌 Node 仅作回退；核心的安装/更新用内置 pnpm——最终用户机器上**不需要安装 node/npm**。（注：MCP 子进程依赖用户 PATH 里的 node/npx，常规开发机均满足。）
 
 > **DSH 来自哪个 npm 仓库？** 核心 `@deepseek-ai/dsh` 发布在官方 **npmjs.org**（`https://registry.npmjs.org`）。国内网络下默认使用 npmmirror 镜像（`registry.npmmirror.com`），探测不可用或安装失败时会自动回退 npmjs.org，也可用 `DSH_DESKTOP_NPM_REGISTRY` 指定。安装过程会显示**实时进度条与已下载大小**。
 
@@ -37,17 +37,23 @@
     </td>
     <td width="50%" valign="top">
       <h3>系统托盘</h3>
-      <p>DeepSeek 鲸鱼托盘图标，右键「打开 / 退出」。开启「常驻通知栏」后，关闭窗口最小化到托盘，后台持续运行。</p>
+      <p>鲸鱼托盘图标，右键「打开 / 重启核心 / 退出」（插件还可贡献自己的菜单分区）。开启「常驻通知栏」后，关闭窗口最小化到托盘，后台持续运行。</p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <h3>保持最新</h3>
-      <p>内置「核心」设置页显示 DSH 版本、一键检查更新，支持自动更新（新版本自动下载并提示重启）。</p>
+      <p>内置「核心」设置页显示 DSH 版本、一键检查更新、稳定/体验/实验三条更新渠道，支持自动更新（新版本自动下载安装，失败自动回滚）。</p>
     </td>
     <td width="50%" valign="top">
       <h3>任务通知</h3>
       <p>主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）；可选「阻止休眠」，任务运行期间防止系统睡眠。</p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <h3>内置插件市场 + 插件生态</h3>
+      <p>随壳自带 dshmarket 插件市场（免下载安装），可浏览/搜索/一键安装社区插件；插件还能调用桌面壳的 RPC 扩展面：桌面通知、托盘菜单、任务栏进度/角标、桌面浮窗（桌面宠物）等。</p>
     </td>
   </tr>
   <tr>
@@ -110,7 +116,7 @@ npm start
        └─ 定位 DSH：应用托管目录 → node_modules → npm _npx 缓存（最新完整安装）
        └─ 没有则 pnpm add @deepseek-ai/dsh@latest（内置 pnpm；registry 探测 + 失败重试/换镜像 + 实时进度条）
        └─ 端口预检：被占用则弹「换端口并重试」面板（端口持久化）
-       └─ spawn: Electron 自身 (ELECTRON_RUN_AS_NODE=1) <dsh>/lib/bin.js --patch <desktop-plugin> --profile web --port X [--no-open]
+       └─ spawn: 内置 Node 24 (resources/node) <dsh>/lib/bin.js --patch <desktop-plugin> --profile web --port X [--no-open]
             └─ 桌面插件嵌入 DSH UI：窗口控制条 / 设置页 / 更新徽章
             └─ DSH 打印 URL → 应用解析 → loadURL 到 frameless 窗口
        └─ 启动/加载失败或插件未挂载 → 回到启动页（自带窗口控制条 + 重试/换端口/退出），
@@ -201,7 +207,7 @@ ctx.slots.register({ name: "settings.section", id: "my-plugin", order: 50, label
 - **通知安全**：任务通知走本机回环 HTTP 桥（`127.0.0.1`），每次启动使用**随机端口 + 随机令牌**，网页和无关本地进程无法伪造或刷屏通知。
 - **macOS 报"已损坏，无法打开" / "无法验证开发者"**：当前未签名，这是 macOS Gatekeeper 对下载的未签名 App 的拦截（Apple Silicon 上 arm64 版最常显示"已损坏"）。**不是包坏了**，壳有完整的 x64 和 arm64 版本（release 里的 `*-arm64.dmg`）。临时绕过：**右键应用 → 打开**，或终端执行 `xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness Desktop.app"`。要彻底解决需给 macOS 包签名+公证（见下文「macOS 签名与公证」）。
 - **macOS 签名与公证**：
-  - **不买账号也能签**（自制自签名证书）：仓库 Secrets 配 `CSC_LINK`（.p12 的 base64）+ `CSC_KEY_PASSWORD` + `CSC_NAME`（证书名）。本仓库已附一个生成好的自签名证书（见工作流注释）。注意自签名证书**只在本机/信任它的 Mac 上免提示打开**，其他用户仍需右键 → 打开。
+  - **不买账号也能签**（自制自签名证书）：在 Windows 上用 `New-SelfSignedCertificate -Type CodeSigningCert` 生成并导出 .p12，仓库 Secrets 配 `CSC_LINK`（.p12 的 base64）+ `CSC_KEY_PASSWORD` + `CSC_NAME`（证书名），生成步骤见构建工作流注释。注意自签名证书**只在本机/信任它的 Mac 上免提示打开**，其他用户仍需右键 → 打开。
   - **彻底解决**（付费 Apple Developer 账号）：Developer ID 证书 + 公证凭据 `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`（或 `APPLE_API_KEY`/`APPLE_API_KEY_ID`/`APPLE_API_ISSUER`），配齐后 GitHub Actions 自动签名并 notarytool 公证，所有 Mac 双击即开。
   - **什么都没配**时：`scripts/mac-sign.js` 自动做 ad-hoc 自签名，"已损坏" → "无法验证开发者"（右键 → 打开 可用）。
 - **与浏览器里的 DSH 共用数据**：默认共用 `~/.dsh`，会话互通。

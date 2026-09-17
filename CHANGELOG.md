@@ -28,6 +28,11 @@
 - **dshmarket 暂存跳过同版本重拷**：每次 spawn 的全量 rm+recopy（同步 IO 落在重启链上）改为版本一致即跳过；pnpm prune 删除后仍自愈重拷。
 - **whpromo 轮询自适应 + 浅比较**：/state 活动期（resolving/downloading/verifying）1s、稳态 10s，快照未变不重渲染——此前每秒无条件 fetch + emit × 打开的标签页数；通知游标初始化不受浅比较影响。
 - **设置页 ToggleRow 展示 helper**：六处「label + 开关」行收敛为单行调用（刻意不引入 schema 层——维持既定决策）。
+- **README 漂移修复（4 处）**：运行时描述改为「内置独立 Node 24 优先、Electron 内嵌仅回退」（正文 + 工作原理图，原文与事实相反）；托盘菜单补「重启核心」与插件分区；功能表补「内置插件市场 + 插件生态」卖点；删掉"仓库已附自签证书"的失实说法（改为指出生成步骤）。
+- **新增 `scripts/release.js` 一键发版**：版本校验（prerelease 感知）→ 强制 CHANGELOG 已有对应节（Release 说明来源）→ bump package.json → 自动再生 docs/index.html 离线兜底（latestVer + 中英 rel.fallback，取自 CHANGELOG 要点，HTML 转义 + 截断）→ commit + tag，不自动 push；支持 `--dry-run`。
+- **更新徽章双击确认 + 鲸港自更新徽章**：核心/壳更新徽章均改为**两次点击**才执行（10s 确认窗、琥珀色确认态）——误触一击直接杀核心装更新的时代结束；鲸港自身有更新时侧栏也出徽章（中性灰样式，主进程启动 1min 后 + 每 12h 静默检查、设置页手动检查同步），点击两次下载并启动安装。
+- **whaleharbor-promo 主题适配 + 失联出口**：引导卡/简版顶栏 CSS 变量化，`prefers-color-scheme: light` 出一套亮色配色（此前硬编码深色）；/state 连续 5 次失败后引导卡切「与鲸港服务失去连接 + 重试」态，不再永远停在「准备中…」。
+- **LEGACY 退役标记**：client.js PLACEMENT 处立 TODO——最低支持核心升到 ≥0.1.5 时删除 SessionLogButton/44px 按钮 CSS/隐藏规则（~250 行），现行为不变（§4 红线）。
 
 ## [1.9.3] - 2026-09-17
 
