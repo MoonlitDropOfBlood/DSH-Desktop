@@ -41,7 +41,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
 
 const REPO = process.env.WHPROMO_REPO || "MoonlitDropOfBlood/DSH-Desktop";
 const API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -286,8 +286,11 @@ function begin(args, cb) {
 // ---------------------------------------------------------------------------
 // standalone lite-client window (browser --app mode)
 
-/** Locate a Chromium-family browser executable for the current platform. */
-function findBrowser() {
+/** Locate a Chromium-family browser executable for the current platform.
+ *  ASYNC (cb(pathOrNull)): the old execFileSync probes ran inside the DSH
+ *  core's plugin host and could stall its event loop for tens-to-hundreds of
+ *  ms per candidate on /open-app. */
+function findBrowser(cb) {
   const candidates = [];
   if (process.platform === "win32") {
     const roots = [process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.LocalAppData]
@@ -309,42 +312,48 @@ function findBrowser() {
     candidates.push("google-chrome", "google-chrome-stable", "microsoft-edge", "microsoft-edge-stable",
       "chromium", "chromium-browser", "brave-browser");
   }
-  const which = require("child_process").execFileSync;
-  for (const c of candidates) {
-    try {
-      const absolute = c.includes("/") || c.includes(path.sep);
-      if (process.platform === "win32" && absolute) {
-        if (fs.existsSync(c)) return c;
-        continue;
-      }
-      if (!absolute) { which("which", [c], { stdio: "ignore" }); return c; }
-      if (fs.existsSync(c)) return c;
-    } catch { /* next candidate */ }
-  }
   // Windows last resort: PATH lookup via where.exe (covers portable installs).
-  if (process.platform === "win32") {
-    for (const name of ["chrome", "msedge", "brave"]) {
-      try {
-        const out = require("child_process").execFileSync("where.exe", [name], { stdio: ["ignore", "pipe", "ignore"] }).toString().split(/\r?\n/)[0].trim();
-        if (out && fs.existsSync(out)) return out;
-      } catch { /* next */ }
+  const tryWhere = (i) => {
+    const names = ["chrome", "msedge", "brave"];
+    if (process.platform !== "win32" || i >= names.length) { cb(null); return; }
+    execFile("where.exe", [names[i]], { windowsHide: true }, (err, stdout) => {
+      const first = String(stdout || "").split(/\r?\n/)[0].trim();
+      if (!err && first && fs.existsSync(first)) cb(first);
+      else tryWhere(i + 1);
+    });
+  };
+  const step = (i) => {
+    if (i >= candidates.length) { tryWhere(0); return; }
+    const c = candidates[i];
+    const absolute = c.includes("/") || c.includes(path.sep);
+    if (absolute) {
+      if (fs.existsSync(c)) cb(c);
+      else step(i + 1);
+      return;
     }
-  }
-  return null;
+    // Relative command name — probe via `which` (POSIX; the win32 candidate
+    // list never contains relative names).
+    execFile("which", [c], { windowsHide: true }, (err) => {
+      if (!err) cb(c);
+      else step(i + 1);
+    });
+  };
+  step(0);
 }
 
 function openAppWindow(url, cb) {
-  try {
-    const browser = findBrowser();
+  findBrowser((browser) => {
     if (!browser) { cb({ ok: false, error: "未找到 Chrome / Edge / Brave（无法创建独立窗口）" }); return; }
-    const child = spawn(browser, [`--app=${url}`], { detached: true, stdio: "ignore" });
-    child.on("error", (e) => cb({ ok: false, error: String(e.message || e) }));
-    child.unref();
-    log(`opened standalone app window via ${browser}`);
-    cb({ ok: true, browser: path.basename(browser) });
-  } catch (e) {
-    cb({ ok: false, error: String((e && e.message) || e) });
-  }
+    try {
+      const child = spawn(browser, [`--app=${url}`], { detached: true, stdio: "ignore" });
+      child.on("error", (e) => cb({ ok: false, error: String(e.message || e) }));
+      child.unref();
+      log(`opened standalone app window via ${browser}`);
+      cb({ ok: true, browser: path.basename(browser) });
+    } catch (e) {
+      cb({ ok: false, error: String((e && e.message) || e) });
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

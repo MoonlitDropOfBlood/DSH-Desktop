@@ -31,6 +31,17 @@ window.addEventListener("mousedown", (e) => {
     && e.target.closest("button, a, input, select, textarea")) return;
   dragState = { x: e.screenX, y: e.screenY, moved: false };
 }, true);
+// Coalesce mousemove bursts into one IPC per animation frame: on a
+// high-refresh display the per-event send used to fire 120+ times a second,
+// each a round trip into the main process for a few pixels of translation.
+let pendingDrag = null;
+let dragRaf = 0;
+function flushDrag() {
+  if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
+  const d = pendingDrag;
+  pendingDrag = null;
+  if (d && (d.dx || d.dy)) ipcRenderer.send("dsh-float:drag", d);
+}
 window.addEventListener("mousemove", (e) => {
   if (!dragState) return;
   const dx = e.screenX - dragState.x;
@@ -39,9 +50,13 @@ window.addEventListener("mousemove", (e) => {
   dragState.moved = true;
   dragState.x = e.screenX;
   dragState.y = e.screenY;
-  ipcRenderer.send("dsh-float:drag", { dx, dy });
+  pendingDrag = pendingDrag ? { dx: pendingDrag.dx + dx, dy: pendingDrag.dy + dy } : { dx, dy };
+  if (!dragRaf) dragRaf = requestAnimationFrame(flushDrag);
 }, true);
-window.addEventListener("mouseup", () => { dragState = null; }, true);
+window.addEventListener("mouseup", () => {
+  dragState = null;
+  flushDrag(); // land the window exactly where the button was released
+}, true);
 
 contextBridge.exposeInMainWorld("__dshFloat", {
   // Register the single downstream listener (float.window.state pushes are

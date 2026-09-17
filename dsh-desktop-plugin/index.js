@@ -42,6 +42,13 @@ const TOKEN = process.env.DSH_DESKTOP_NOTIFY_TOKEN || "";
 const NOTIFY_URL = `http://127.0.0.1:${PORT}/`;
 const PLUGIN_NAME = "dsh-desktop";
 
+if (!process.env.DSH_DESKTOP_NOTIFY_PORT) {
+  // The shell always passes the per-launch random port; hitting this fallback
+  // means we are running outside the shell (or the env got stripped) — every
+  // bridge call would 401/fail silently. Say so once, loudly.
+  console.warn(`[${PLUGIN_NAME}] DSH_DESKTOP_NOTIFY_PORT missing — NOTIFY_URL falls back to ${NOTIFY_URL}; bridge RPC will not reach the shell.`);
+}
+
 const textEncoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
 
 /**
@@ -53,6 +60,10 @@ function rpc(method, params, cb) {
   try {
     const payload = JSON.stringify({ method, params });
     const body = textEncoder ? textEncoder.encode(payload) : payload;
+    // 10s cap: the bridge is localhost and normally instant; a hung bridge
+    // must not suspend the register retry chain / notifications forever.
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null;
     fetch(NOTIFY_URL, {
       method: "POST",
       headers: {
@@ -61,13 +72,15 @@ function rpc(method, params, cb) {
         // via env; the bridge rejects requests without the correct token.
         ...(TOKEN ? { "x-dsh-notify-token": TOKEN } : {})
       },
-      body
+      body,
+      signal: ctrl ? ctrl.signal : undefined
     }).then(async (res) => {
+      if (timer) clearTimeout(timer);
       if (!cb) return;
       let result = null;
       try { result = await res.json(); } catch { /* non-JSON */ }
       cb(result);
-    }).catch(() => { if (cb) cb(null); });
+    }).catch(() => { if (timer) clearTimeout(timer); if (cb) cb(null); });
   } catch {
     if (cb) cb(null);
   }
@@ -123,7 +136,7 @@ module.exports = {
           // suppression (the window may regain focus as the tray menu closes).
           rpc("notify.show", {
             kind: "status",
-            title: "DeepSeek Harness",
+            title: "鲸港 WhaleHarbor",
             body: statusLabel(),
             force: true
           });

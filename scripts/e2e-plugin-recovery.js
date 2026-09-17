@@ -75,9 +75,9 @@ function killTree(pid) {
   });
 }
 
-function httpOk(port) {
+function httpOk(url) {
   return new Promise((resolve) => {
-    const req = http.get({ host: "127.0.0.1", port, path: "/", timeout: 2500 }, (res) => {
+    const req = http.get(url, { timeout: 2500 }, (res) => {
       res.resume();
       resolve(res.statusCode !== undefined && res.statusCode < 400);
     });
@@ -149,6 +149,13 @@ async function run() {
     windowsHide: false
   });
 
+  // Readiness probe target. Core ≥0.1.2-rc.1 requires the auth token on EVERY
+  // request — a bare GET / answers 401, so the old bare-port probe could never
+  // pass against modern cores. Pin the FULL (tokened) URL the shell detected
+  // from the core's own output; the bare fallback covers old cores whose
+  // printed URL has no token.
+  let targetUrl = `http://127.0.0.1:${PORT}/`;
+
   const want = {
     recovery: /plugin recovery #1:.*removed/,
     notice: /plugin recovery: showing uninstall notice/,
@@ -161,12 +168,14 @@ async function run() {
     while (Date.now() < deadline) {
       if (fs.existsSync(LOG_FILE)) {
         const text = fs.readFileSync(LOG_FILE, "utf8");
+        const um = text.match(/detected URL: (http:\/\/127\.0\.0\.1:\d+\/\S+)/);
+        if (um) targetUrl = um[1];
         for (const k of Object.keys(want)) if (!seen[k] && want[k].test(text)) {
           seen[k] = true;
           console.log(`  ✓ log marker: ${k}`);
         }
       }
-      if (seen.recovery && seen.notice && (await httpOk(PORT))) { pass = true; break; }
+      if (seen.recovery && seen.notice && (await httpOk(targetUrl))) { pass = true; break; }
       await sleep(2000);
     }
     // profile assertions
@@ -180,7 +189,7 @@ async function run() {
     }
     if (!seen.recovery) { console.log("  ✗ no plugin recovery happened"); }
     if (!seen.notice) { console.log("  ✗ uninstall notice panel never shown"); }
-    if (!(await httpOk(PORT))) { console.log("  ✗ core not serving after recovery"); }
+    if (!(await httpOk(targetUrl))) { console.log("  ✗ core not serving after recovery"); }
     console.log(pass && seen.recovery && seen.notice ? "\nE2E RESULT: PASS" : "\nE2E RESULT: FAIL");
     if (!(pass && seen.recovery && seen.notice) && fs.existsSync(LOG_FILE)) {
       const lines = fs.readFileSync(LOG_FILE, "utf8").split(/\r?\n/);

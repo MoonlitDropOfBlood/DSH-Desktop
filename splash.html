@@ -442,6 +442,18 @@ h1 {
         applyTheme("system", mq ? mq.matches : true);
       }
 
+      // ---- titlebar window controls ----
+      // Wire BEFORE the no-bridge bail: the splash is a frameless window, and
+      // a dead close button with no way out is the one thing it must never be.
+      // Without the bridge (page opened outside the shell) close degrades to
+      // window.close().
+      document.querySelectorAll("#titlebar .btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          if (bridge) bridge.windowControl(btn.dataset.act);
+          else if (btn.dataset.act === "close") window.close();
+        });
+      });
+
       if (!bridge) return;
 
       var statusEl = document.getElementById("status");
@@ -479,7 +491,9 @@ h1 {
       // ---- status / log / progress wiring ----
       bridge.onStatus(function (message) {
         statusEl.textContent = message;
-        setErrorClass(/失败|错误|无法|超时|占用/.test(message));
+        // English keywords cover main-process statuses that skip translation
+        // (EADDR/EACCES/EPERM/ENOENT surface raw from Node on failure paths).
+        setErrorClass(/失败|错误|无法|超时|占用|failed|error|denied|timeout|refused|EADDR|EACCES|EPERM|ENOENT/i.test(message));
       });
 
       bridge.onLog(function (line) {
@@ -541,6 +555,9 @@ h1 {
         copyBaseLabel = isInfo ? "复制详情" : "复制错误信息";
         btnCopy.textContent = copyBaseLabel;
         errorPanel.classList.add("visible");
+        // An error panel means the progress bar below it is stale — hide it
+        // (a leftover "已下载 84%" under a failure message reads as a lie).
+        progressWrap.hidden = true;
         // Error state: hide the logo + spinner entirely, show a static error glyph
         logoWrap.style.display = "none";
         spinnerEl.classList.add("hidden");

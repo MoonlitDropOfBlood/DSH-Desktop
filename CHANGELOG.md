@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **`prepareDesktopPlugin` 改用 asar 安全的 `copyDirRecursive`**：原逐文件平铺拷贝在插件目录出现任何子目录时（打包版源在 asar 内）会抛 EISDIR → 整个 patch 静默不生成、窗口控制条降级为兜底条。
+- **splash 三处**：无桥打开时标题条窗口按钮现在也接线（close 降级 `window.close()`，frameless 窗口不再有"点不动的关闭键"）；错误面板出现时隐藏过期进度条（残留的"已下载 84%"在失败信息下如同撒谎）；状态红字判定补充英文关键词（EADDR/EACCES/EPERM/ENOENT/timeout/failed 等裸错误不再漏标红）。
+- **dsh-desktop-plugin `rpc()` 加 10s AbortController 超时**：桥挂死不再无限悬挂 register 重试链与通知；`DSH_DESKTOP_NOTIFY_PORT` 缺失时的固定端口回退不再静默（每次落回 401 都一无所得，现在启动时明确告警）。
+- **whaleharbor-promo `findBrowser` 改异步 `execFile`**：原 `execFileSync` 探测跑在 DSH 核心进程内，`/open-app` 触发时可阻塞事件循环数十至数百 ms。
+- **浮窗拖拽 IPC 按 rAF 合并**：mousemove 逐事件发送在高刷屏上一秒 120+ 次跨进程往返，现每帧至多一次、mouseup 时冲正最终位移。
+- **e2e-plugin-recovery 就绪门禁修复（测试脚本腐化）**：脚本写在 0.1.1-rc.2 无 token 认证时代，裸 `GET /` 就绪探测在 core ≥0.1.2-rc.1（token 认证）上永远 401、门禁永不通过——改用壳日志 `detected URL` 的完整带 token URL 探测，老核心裸 URL 回退兼容。真机回归（0.1.5-rc.2）：recovery/notice 标记 + 双删断言 + E2E RESULT: PASS。
+
+### 变更
+
+- **客户端插件 `useUpdateState` 收敛为页面级共享 store**：侧栏徽章与两个设置区此前各自注册一份 `getUpdateState` + push 监听（每页 3 份），现单份共享，初始拉取补 `.catch`（此前 IPC 失败是 unhandled rejection）；HMR/卸载时经 `ctx.effect` 释放页面级订阅。
+- **品牌文案两处落点修正**（仅显示层，内部标识不变）：托盘状态通知标题、设置页「打开鲸港」提示。
+- **仓库卫生**：`.gitignore` 补 `.inst-test*/`；`market-friends-pr.md` 草稿收编至 `designs/`；新增 `npm run clean`（清理根目录构建日志/tgz 与 dist 旧版本安装包，本次首清回收 ~404MB）。
+
 ## [1.9.3] - 2026-09-17
 
 ### 修复

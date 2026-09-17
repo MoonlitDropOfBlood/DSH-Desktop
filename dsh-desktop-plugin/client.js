@@ -81,19 +81,50 @@ window.__ModuleLoader__.load({
 			return !!b && typeof b[name] === "function";
 		}
 
-		/** Live update state, kept in sync with the main process. */
+		/** Live update state, kept in sync with the main process. Shared page-level
+		 *  store: ONE getUpdateState + ONE push subscription for the whole page —
+		 *  the sidebar badge and both settings sections used to register three
+		 *  separate IPC listeners each. The initial get promise carries a .catch
+		 *  (an IPC failure used to be an unhandled rejection); the push channel
+		 *  still feeds us afterwards. */
+		const updateStateStore = (function () {
+			let state = null;
+			let offPush = null;
+			let started = false;
+			const subs = new Set();
+			function notify(s) {
+				state = s;
+				for (const fn of Array.from(subs)) { try { fn(); } catch (e) { /* noop */ } }
+			}
+			function start() {
+				if (started) return;
+				started = true;
+				if (!hasBridge("getUpdateState")) return;
+				bridge().getUpdateState().then((s) => { if (s) notify(s); })
+					.catch(() => { /* bridge hiccup — the push subscription still feeds us */ });
+				if (hasBridge("onUpdateState")) {
+					offPush = bridge().onUpdateState((s) => { if (s) notify(s); });
+				}
+			}
+			return {
+				subscribe(fn) { subs.add(fn); start(); return () => { subs.delete(fn); }; },
+				getSnapshot() { return state; },
+				// HMR / plugin reload: drop the page-lifetime push subscription
+				// (the fresh factory run builds a new store anyway).
+				dispose() {
+					if (offPush) { try { offPush(); } catch (e) { /* noop */ } offPush = null; }
+					subs.clear();
+					started = false;
+					state = null;
+				}
+			};
+		})();
 		function useUpdateState() {
-			const [state, setState] = React.useState(null);
-			React.useEffect(() => {
-				let disposed = false;
-				if (!hasBridge("getUpdateState")) return undefined;
-				bridge().getUpdateState().then((s) => { if (!disposed) setState(s); });
-				const off = hasBridge("onUpdateState")
-					? bridge().onUpdateState((s) => { if (!disposed) setState(s); })
-					: undefined;
-				return () => { disposed = true; if (typeof off === "function") off(); };
-			}, []);
-			return state;
+			return React.useSyncExternalStore(
+				updateStateStore.subscribe,
+				updateStateStore.getSnapshot,
+				updateStateStore.getSnapshot
+			);
 		}
 
 		// ---- 1. frameless window controls (top-right, immersive) ----------------
@@ -833,7 +864,7 @@ window.__ModuleLoader__.load({
 						React.createElement("input", { type: "checkbox", checked: closeToTray, onChange: toggleTray }),
 						React.createElement("span", null, closeToTray ? "已开启" : "已关闭"))),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					"开启后：点关闭按钮不退出，最小化到通知栏；通知栏图标右键可「打开 DeepSeek Harness」或「退出」。"),
+					"开启后：点关闭按钮不退出，最小化到通知栏；通知栏图标右键可「打开鲸港」或「退出」。"),
 				React.createElement("div", { className: "dsh-desktop-row" },
 					React.createElement("span", { className: "dsh-desktop-label" }, "阻止休眠"),
 					React.createElement("label", { className: "dsh-desktop-toggle" },
@@ -1165,6 +1196,9 @@ window.__ModuleLoader__.load({
 			// plus a body observer for the live DOM markers (fallback while the
 			// version promise resolves).
 			placementStore = createPlacementStore();
+			// The shared update-state store registers a page-lifetime push
+			// subscription — release it on plugin unload/HMR.
+			if (typeof ctx.effect === "function") ctx.effect(() => () => updateStateStore.dispose());
 			// DOM-marker fallback observer: feeds the store only while the
 			// bridge's version promise is unresolved. Once the version ANSWERS
 			// (parseable), the store ignores DOM input entirely and this body-wide

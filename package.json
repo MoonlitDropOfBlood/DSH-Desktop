@@ -11,6 +11,7 @@
   },
   "scripts": {
     "start": "electron .",
+    "clean": "node scripts/clean.js",
     "test": "node scripts/test-url-extract.js && node scripts/test-plugin-recovery.js && node scripts/test-core-version.js && node scripts/test-shell-asset.js && node scripts/test-settings-json.js && node scripts/check-docs-page.js",
     "test:e2e:recovery": "node scripts/e2e-plugin-recovery.js",
     "test:e2e:float": "node scripts/e2e-float-window.js",
