@@ -55,6 +55,15 @@ const DEFAULT_PORT = 3080;
 // Desktop" — it decides the userData path & installer identity; only this
 // user-visible string carries the new brand.
 const APP_NAME = "鲸港 WhaleHarbor";
+/**
+ * ASCII-only User-Agent for the shell self-update HTTP requests. HTTP headers
+ * must be latin-1: using APP_NAME ("鲸港 WhaleHarbor") here made EVERY
+ * queryShellLatest/downloadFile call throw ERR_INVALID_CHAR synchronously —
+ * silent "检查失败" since the v1.7.0 brand rename, and a boot+60s crash panel
+ * once the background check timer landed in 1.9.4. Display surfaces keep
+ * APP_NAME; wire headers get this constant.
+ */
+const SHELL_UA = "WhaleHarbor/" + app.getVersion();
 /** GitHub repo that hosts the shell's own releases (owner/repo). */
 const SHELL_REPO = process.env.DSH_DESKTOP_SHELL_REPO || "MoonlitDropOfBlood/DSH-Desktop";
 /** GitHub API / release-download mirror prefixes (trailing slash REQUIRED),
@@ -3849,19 +3858,29 @@ function shellVersionCurrent() {
 let shellUpdateInfo = null;
 
 /** Silent background shell-update check: no panel, no toast — just keeps the
- *  sidebar hint current. Runs ~1min after boot, then every 12h. */
+ *  sidebar hint current. Runs ~1min after boot, then every 12h. A timer-driven
+ *  path must NEVER reach uncaughtException (that surfaces the crash panel) —
+ *  every layer gets its own catch and logs instead. */
 function checkShellUpdateSilent() {
   if (isQuitting || isUpdating) return;
-  queryShellLatest((info) => {
-    if (!info) return;
-    const has = compareVersions(info.version, shellVersionCurrent()) > 0;
-    const next = has ? { version: info.version } : null;
-    if (Boolean(next) !== Boolean(shellUpdateInfo)
-      || (next && shellUpdateInfo && next.version !== shellUpdateInfo.version)) {
-      shellUpdateInfo = next;
-      pushUpdateState();
-    }
-  });
+  try {
+    queryShellLatest((info) => {
+      try {
+        if (!info) return;
+        const has = compareVersions(info.version, shellVersionCurrent()) > 0;
+        const next = has ? { version: info.version } : null;
+        if (Boolean(next) !== Boolean(shellUpdateInfo)
+          || (next && shellUpdateInfo && next.version !== shellUpdateInfo.version)) {
+          shellUpdateInfo = next;
+          pushUpdateState();
+        }
+      } catch (err) {
+        log(`shell update check callback failed: ${err.message}`);
+      }
+    });
+  } catch (err) {
+    log(`shell update check failed: ${err.message}`);
+  }
 }
 
 /** Compare two dotted SHELL versions (v1.2.3 tags, no prereleases); >0 if a
@@ -3889,7 +3908,7 @@ function queryShellLatest(cb) {
   const attempt = (i) => {
     if (i >= candidates.length) { cb(null); return; }
     const req = https.get(candidates[i], {
-      headers: { "User-Agent": APP_NAME, Accept: "application/vnd.github+json" }
+      headers: { "User-Agent": SHELL_UA, Accept: "application/vnd.github+json" }
     }, (res) => {
       let body = "";
       res.setEncoding("utf8");
@@ -3937,7 +3956,7 @@ function shellAssetForPlatform(assets) {
 /** Download url → dest following redirects, with onProgress(got, total). */
 function downloadFile(url, dest, onProgress, cb) {
   const follow = (u, hops) => {
-    const req = https.get(u, { headers: { "User-Agent": APP_NAME } }, (res) => {
+    const req = https.get(u, { headers: { "User-Agent": SHELL_UA } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         if (hops <= 0) { cb(new Error("重定向过多")); return; }

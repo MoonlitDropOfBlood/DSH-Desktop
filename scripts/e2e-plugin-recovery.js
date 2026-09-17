@@ -190,6 +190,21 @@ async function run() {
     if (!seen.recovery) { console.log("  ✗ no plugin recovery happened"); }
     if (!seen.notice) { console.log("  ✗ uninstall notice panel never shown"); }
     if (!(await httpOk(targetUrl))) { console.log("  ✗ core not serving after recovery"); }
+    // Regression guard for the 2026-09-18 boot-crash class: the silent shell
+    // update check fires ~60s after boot — timer-driven paths must never
+    // reach uncaughtException. Stay alive past it and assert the log stayed
+    // clean (only when the recovery itself passed).
+    if (pass && seen.recovery && seen.notice) {
+      console.log("staying alive 75s to cover the 60s silent-update-check timer…");
+      await sleep(75000);
+      const text2 = fs.readFileSync(LOG_FILE, "utf8");
+      if (/uncaughtException|unhandledRejection/.test(text2)) {
+        console.log("  ✗ uncaughtException surfaced after the 60s timer");
+        pass = false;
+      } else {
+        console.log("  ✓ no uncaughtException after the 60s timer");
+      }
+    }
     console.log(pass && seen.recovery && seen.notice ? "\nE2E RESULT: PASS" : "\nE2E RESULT: FAIL");
     if (!(pass && seen.recovery && seen.notice) && fs.existsSync(LOG_FILE)) {
       const lines = fs.readFileSync(LOG_FILE, "utf8").split(/\r?\n/);

@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+## [1.9.5] - 2026-09-18
+
+### 修复
+
+- **主进程启动 60 秒后崩溃面板（1.9.4 回归，严重）**：新增的壳更新后台检查定时器触发了 `queryShellLatest` 的潜伏 bug——`User-Agent` 使用了含中文的显示品牌「鲸港 WhaleHarbor」，而 HTTP 头不允许非 latin1 字符，`https.get` 同步抛 `ERR_INVALID_CHAR` → uncaughtException → 错误面板。该 bug 实际自 v1.7.0 品牌更名起就存在：此前只在设置页手动「检查更新」时触发、被 `.catch` 吞成"检查失败"——壳自更新检查自那时起一直是坏的。修复：新增 ASCII-only 的 `SHELL_UA`（`WhaleHarbor/<version>`）替换两处 HTTP 头；后台检查路径整体加防御性 catch（定时器驱动的路径永远不允许触发崩溃面板）。
+- **e2e 回归护航加码**：recovery e2e 通过后保持实例存活 75 秒，断言 60 秒静默检查定时器窗口内日志无 uncaughtException/unhandledRejection（本轮修复的直接回归覆盖）。
+
 ## [1.9.4] - 2026-09-17
 
 ### 修复

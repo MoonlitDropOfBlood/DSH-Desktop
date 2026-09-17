@@ -29,6 +29,7 @@ const { isNewer } = require("../core-version.js");
 const ROOT = path.join(__dirname, "..");
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
+const noCommit = args.includes("--no-commit");
 const version = args.find((a) => !a.startsWith("--"));
 
 function fail(msg) {
@@ -61,8 +62,10 @@ if (!sectionMatch) {
 const section = sectionMatch[0];
 
 // Regenerate the promo-page offline fallbacks from the CHANGELOG bullets.
+// (Strip \r first: CRLF checkouts leave it on every split line and break the
+// line-anchored regex below.)
 const bullets = [];
-for (const line of section.split("\n")) {
+for (const line of section.replace(/\r/g, "").split("\n")) {
   const m = line.match(/^- \*\*([^*]+)\*\*[：:]\s*(.+)$/);
   if (m) bullets.push({ title: m[1].trim(), desc: m[2].trim() });
 }
@@ -106,6 +109,14 @@ fs.writeFileSync(docsPath, docs);
 console.log("package.json → " + version);
 console.log(docs === docsBefore ? "docs/index.html: unchanged" : "docs/index.html: fallbacks regenerated");
 if (docs === docsBefore) fs.writeFileSync(docsPath, docsBefore);
+
+if (noCommit) {
+  console.log("files updated (--no-commit) — finish manually:");
+  console.log("  git add package.json CHANGELOG.md docs/index.html");
+  console.log(`  git commit -m "release: ${version}" && git tag v${version}`);
+  console.log(`  git push origin master v${version}`);
+  process.exit(0);
+}
 
 const { execFileSync } = require("child_process");
 const git = (...a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8" }).trim();

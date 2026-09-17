@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.9.4 亮点</h4><ul><li><strong>prepareDesktopPlugin 改用 asar 安全的 copyDirRecursive</strong>：原逐文件平铺拷贝在插件目录出现任何子目录时（打包版源在 asar 内）会抛 EISDIR → 整个 patch 静默不生成、窗口控制条降级为兜底条。</li><li><strong>splash 三处</strong>：无桥打开时标题条窗口按钮现在也接线（close 降级 window.close()，frameless…</li><li><strong>dsh-desktop-plugin rpc() 加 10s AbortController 超时</strong>：桥挂死不再无限悬挂 register 重试链与通知；DSH_DESKTOP_NOTIFY_PORT 缺失时的固定端口回退不再静默（每次落回 401…</li><li><strong>whaleharbor-promo findBrowser 改异步 execFile</strong>：原 execFileSync 探测跑在 DSH 核心进程内，/open-app 触发时可阻塞事件循环数十至数百 ms。</li></ul>',
+      'rel.fallback': '<h4>v1.9.5 亮点</h4><ul><li><strong>主进程启动 60 秒后崩溃面板（1.9.4 回归，严重）</strong>：新增的壳更新后台检查定时器触发了 queryShellLatest 的潜伏 bug——User-Agent 使用了含中文的显示品牌「鲸港 WhaleHarbor」，而…</li><li><strong>e2e 回归护航加码</strong>：recovery e2e 通过后保持实例存活 75 秒，断言 60 秒静默检查定时器窗口内日志无…</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.9.4 highlights</h4><ul><li><strong>prepareDesktopPlugin 改用 asar 安全的 copyDirRecursive</strong>：原逐文件平铺拷贝在插件目录出现任何子目录时（打包版源在 asar 内）会抛 EISDIR → 整个 patch 静默不生成、窗口控制条降级为兜底条。</li><li><strong>splash 三处</strong>：无桥打开时标题条窗口按钮现在也接线（close 降级 window.close()，frameless…</li><li><strong>dsh-desktop-plugin rpc() 加 10s AbortController 超时</strong>：桥挂死不再无限悬挂 register 重试链与通知；DSH_DESKTOP_NOTIFY_PORT 缺失时的固定端口回退不再静默（每次落回 401…</li><li><strong>whaleharbor-promo findBrowser 改异步 execFile</strong>：原 execFileSync 探测跑在 DSH 核心进程内，/open-app 触发时可阻塞事件循环数十至数百 ms。</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.9.5 highlights</h4><ul><li><strong>主进程启动 60 秒后崩溃面板（1.9.4 回归，严重）</strong>：新增的壳更新后台检查定时器触发了 queryShellLatest 的潜伏 bug——User-Agent 使用了含中文的显示品牌「鲸港 WhaleHarbor」，而…</li><li><strong>e2e 回归护航加码</strong>：recovery e2e 通过后保持实例存活 75 秒，断言 60 秒静默检查定时器窗口内日志无…</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.9.4';
+  var latestVer = 'v1.9.5';
   var lastRelease = null;
 
   function escHtml(s) {
