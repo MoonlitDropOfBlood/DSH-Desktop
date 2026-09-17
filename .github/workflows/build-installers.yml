@@ -12,10 +12,17 @@ on:
 permissions:
   contents: write
 
+# 同一 ref 的重复触发排队执行（发版构建不取消，后到的等先到的完成），
+# 防止 tag 连发时的并行构建与 Release 竞争。
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-windows:
     name: Windows (x64)
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,11 +47,16 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installers
-          path: dist/*.exe
+          retention-days: 14
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
 
   build-linux:
     name: Linux (AppImage + deb + rpm)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -69,6 +81,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-installers
+          retention-days: 14
           path: |
             dist/*.AppImage
             dist/*.deb
@@ -77,6 +90,7 @@ jobs:
   build-mac:
     name: macOS ${{ matrix.arch }}
     runs-on: macos-14
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -142,6 +156,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mac-${{ matrix.arch }}-dmg
+          retention-days: 14
           path: dist/*.dmg
 
   # 单独发布：把所有平台产物合成一个正式 Release（只对 v* 标签触发，避免生成 draft）。
@@ -151,6 +166,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-windows, build-linux, build-mac]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

@@ -13,8 +13,25 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-const NODE = "D:\\Application\\DeepSeek Harness Desktop\\resources\\node\\win32-x64\\node.exe";
-const BIN = path.join(process.env.APPDATA, "DeepSeek Harness Desktop", "dsh", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+// Runtime paths: env-overridable (see e2e-plugin-recovery.js for the rationale).
+const NODE = process.env.DSH_DESKTOP_TEST_NODE
+  || [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "DeepSeek Harness Desktop", "resources", "node", "win32-x64", "node.exe"),
+    path.join(__dirname, "..", "build", "node", "win32-x64", "node.exe")
+  ].find((p) => p && fs.existsSync(p))
+  || path.join(__dirname, "..", "build", "node", "win32-x64", "node.exe");
+const BIN = path.join(
+  process.env.DSH_DESKTOP_TEST_MANAGED || path.join(process.env.APPDATA || "", "DeepSeek Harness Desktop", "dsh"),
+  "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"
+);
+if (!fs.existsSync(NODE)) {
+  console.error(`node runtime not found at ${NODE} — set DSH_DESKTOP_TEST_NODE (or run npm run fetch:node)`);
+  process.exit(1);
+}
+if (!fs.existsSync(BIN)) {
+  console.error(`DSH core not found at ${BIN} — install the shell once, or set DSH_DESKTOP_TEST_MANAGED`);
+  process.exit(1);
+}
 const PORT = 3210;
 const ROUNDS = Number(process.argv[2] || 12);
 

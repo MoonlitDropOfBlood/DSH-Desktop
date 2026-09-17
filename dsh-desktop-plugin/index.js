@@ -97,11 +97,19 @@ module.exports = {
       return "任务状态：空闲";
     }
 
+    // Memoize on the label: subagent bursts fire agent/status at high
+    // frequency while the tray line reads the same — skip the identical POST
+    // (the memo is confirmed on a successful rpc so a bridge hiccup retries).
+    let lastTrayLabel = null;
     function pushTrayMenu() {
       if (!registered) return;
+      const label = statusLabel();
+      if (label === lastTrayLabel) return;
       rpc("tray.setMenu", {
         plugin: PLUGIN_NAME,
-        items: [{ id: "task-status", label: statusLabel() }]
+        items: [{ id: "task-status", label }]
+      }, (result) => {
+        if (result && result.ok) lastTrayLabel = label;
       });
     }
 
@@ -200,7 +208,10 @@ module.exports = {
         const agent = payload.agent;
         if (!agent) return;
         const id = String(agent.id ?? agent.session?.id ?? "agent");
-        approvalPending = false; // any status transition resolves the wait state
+        // Only the MAIN agent's own transition may resolve an approval wait:
+        // a subagent finishing mid-approval used to clear the tray's
+        // "有待确认" flag while the approval was still outstanding.
+        if (!isSubagent(agent)) approvalPending = false;
         if (payload.status === "running") {
           // Only MAIN agents are tracked, so running.delete() below also
           // doubles as the subagent filter for the idle branch.

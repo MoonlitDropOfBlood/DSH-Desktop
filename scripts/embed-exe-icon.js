@@ -63,12 +63,23 @@ function main() {
   fs.writeFileSync(icoPath, ico);
   console.log(`wrote ${icoPath} (${ico.length} bytes)`);
 
-  // rcedit from the winCodeSign cache (survives even when darwin symlinks fail).
-  const candidates = [
-    "C:/Users/wwhby/AppData/Local/electron-builder/Cache/winCodeSign",
-    "C:/Users/wwhby/AppData/Local/electron-builder/Cache/winCodeSign/002395355",
-    "C:/Users/wwhby/AppData/Local/electron-builder/Cache/winCodeSign/119261071"
-  ];
+  // rcedit from the winCodeSign cache (survives even when darwin symlinks
+  // fail). Cache root defaults to %LOCALAPPDATA%\electron-builder\Cache\
+  // winCodeSign (override with DSH_DESKTOP_WINCODESIGN_CACHE); electron-
+  // builder unpacks into numbered subdirectories, so probe those too.
+  const cacheRoots = [
+    process.env.DSH_DESKTOP_WINCODESIGN_CACHE,
+    path.join(process.env.LOCALAPPDATA || "", "electron-builder", "Cache", "winCodeSign")
+  ].filter(Boolean);
+  const candidates = [];
+  for (const root of cacheRoots) {
+    candidates.push(root);
+    try {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        if (entry.isDirectory()) candidates.push(path.join(root, entry.name));
+      }
+    } catch { /* absent cache root */ }
+  }
   let rcedit = null;
   for (const dir of candidates) {
     const p = path.join(dir, "rcedit-x64.exe");

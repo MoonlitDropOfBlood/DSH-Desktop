@@ -20,10 +20,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: promo-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Package
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,12 +43,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: package-tarball
+          retention-days: 14
           path: plugins/whaleharbor-promo/*.tgz
 
   publish-npm:
     name: Publish to npm (Trusted Publishing)
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
       contents: read
@@ -72,6 +79,7 @@ jobs:
     name: Publish GitHub Release
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
         with:

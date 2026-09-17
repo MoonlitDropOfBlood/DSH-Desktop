@@ -6,6 +6,35 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [Unreleased]
+
+## [1.9.3] - 2026-09-17
+
+### 修复
+
+- **壳自更新完整性校验（供应链缺口）**：`queryShellLatest` 透传 GitHub 资产 `digest`，下载完成后 SHA-256 校验通过才允许启动安装；校验失败按该源失败处理、损坏文件删除并自动切下一源（错误文案区分"校验失败"与"网络不可达"）。`asset.name` 经 `path.basename()` 清洗后再拼 temp 路径（封镜像可控文件名的 `../` 逃逸）。此前镜像代理返回什么都直接执行——本地 whpromo 插件早有 digest 校验，壳自己反而没有。
+- **安装包被杀软拦截时壳直接退出**：`launchShellInstaller` 的 `shell.openPath` 失败（AV 隔离/文件缺失）曾只记日志、随后无条件 `app.quit()`——用户看到应用消失且什么都没发生。现在失败经 `dsh:shellDownloadProgress` 回给设置页，壳保持存活；退出只发生在启动成功之后。
+- **whaleharbor-promo SHA-256 校验失败死循环**：损坏文件尺寸恰好等于 total，"同尺寸跳过下载"短路会让重试反复校验同一个坏文件（错误文案还让用户"删除后重试"）。现在校验失败先把坏文件改名 `.sha256-mismatch`（失败则删除）再进错误态。
+- **whaleharbor-promo 通知积压回放**：页面关闭期间积压的通知（feed 最多 50 条）会在重开页面时一次性全弹。`/state` 现在带 `notifySeq`，客户端首拉把游标 pin 到当前水位，只弹之后的新通知。
+- **whaleharbor-promo 架构探测从未生效（比审查发现更深的实锤）**：`detectEnv` 的 UA-CH 回调给越界 `env` 赋值（ReferenceError 被 `.catch` 吞掉），Apple Silicon 上的架构修正从未落地、永远按 x64 下载。现在 env 由 `detectEnv` 闭包持有、探测 promise 挂 `env.archProbe`，`ensureBegin` 与之 `Promise.race`（800ms 上限），探测晚到且架构变化时重新 `/begin`（服务端在 resolving 阶段允许重选资产）。
+- **whaleharbor-promo `downloadMulti` 二次回调**：成功 finish 后迟到的 res error/超时会触发下一源并二次回调（在已 end 的 HTTP 响应上 `writeHead` 抛未捕获异常）。加 settle-once 守卫。
+- **托盘「有操作待确认」被 subagent 事件误清**：`approvalPending` 的清零在 `isSubagent` 过滤之前，任意 subagent 状态流转都会解除主 agent 的等待态。现在只有主 agent 自己的流转才解除；`pushTrayMenu` 另按 label 去重，subagent 高频事件不再逐条打桥 RPC。
+- **核心更新无方向守卫（可静默降级）**：`updateAvailable` 与启动自动更新此前用 `latest !== installed` 字符串不等式——dist-tag 回移或从 alpha 切回 latest 会把旧版当"更新"装回去。现在统一走 `core-version.js` 的 prerelease 感知比较 `isNewer(latest, installed)`；用户在设置页显式点的安装不受挡（渠道契约不变）。
+- **三处静默失败**：① 安装"成功"但定位不到核心（伪成功/杀软隔离）时 splash 永久悬挂——现在弹"未能定位可用的 DSH 核心"错误面板（可重试/退出）；② RPC 桥 5 次绑定失败只剩一行日志——现在经 `update-state` 推 `notifyBridgeOk:false`，设置页显示降级提示；③ 设置写盘失败静默——`dsh:setAutoUpdate`/`dsh:setCoreChannel` 返回态可携带 `writeError`。
+- **splash 三处小修**：无桥打开时标题条按钮接线在 `if (!bridge) return` 之前（窗口按钮此前失灵）；错误面板出现时隐藏过期进度条；错误红字判定补充英文关键词。
+- **whaleharbor-promo 通知轮询 `since=0`**：同"通知积压回放"条。
+
+### 变更
+
+- **版本比较统一**：新增 `core-version.js`（`parseCoreVersion`/`compareCoreVersions`/`isAtLeastByTriple`/`isNewer`，行为锁在 `scripts/test-core-version.js`）；main.js 四处手写版本正则（`supportsNoOpen`/`targetLineSupportsNpm`/`coreAutoMountsProfilePackages` + 更新判断）收敛到该模块，`compareVersions` 只保留给壳自身的 `v1.2.3` 标签比较。`supportsNoOpen` 现为 `compareCoreVersions(v, "0.1.0-rc.8") >= 0`，语义逐点等价（rc.8 起支持、正式版 > 一切 rc）。
+- **壳自更新资产选择抽为 `shell-asset.js`**（`pickShellAsset`/`parseAssetDigest`，行为锁在 `scripts/test-shell-asset.js`）；设置 JSON 解析抽为 `settings-json.js`（BOM 剥离，行为锁在 `scripts/test-settings-json.js`）。三者均登记进 electron-builder `files` 白名单。
+- **主窗口 `will-navigate` 防护**：只放行 `file:` 与 `127.0.0.1|localhost:<端口>/`（任意 path，兼容 token 同源跳转），其余 preventDefault + 记日志——preload 桥不能被注入页面带去外部源。
+- **客户端插件常驻开销**：placement 的 body 级 MutationObserver 在版本信号解析成功后 disconnect（每次突变 3 个全文档 querySelector 的纯开销归零）；设置导航 sync 早退 + 跳过冗余 marker 写（流式输出期间每秒几十次全文档扫描→近零）。
+- **WindowControls 测量优化**：`sync()` 改为先集中读后集中写（消除单次 sync 多次同步 reflow），全部触发源经 requestAnimationFrame 合并，侧栏节点失联时自愈重解析并迁移 ResizeObserver。测量语义与常量未动。
+- **测试与 CI 从 0 到 1**：`npm test` 收拢 6 个零依赖纯 Node 测试套件；新增 `.github/workflows/ci.yml`（push/PR 触发：npm test + 全量 node --check）；build-installers/release-whaleharbor-promo 两个 workflow 补 `timeout-minutes`/`concurrency`/artifact `retention-days`；Windows 产物附带上传 `.blockmap` 与 `latest.yml`（差分更新/第二校验源预留）。
+- **真机脚本去硬编码路径**：e2e-plugin-recovery / repro-restart-race / repro-plugin-failure 的 node 与核心路径改为 `DSH_DESKTOP_TEST_NODE`/`DSH_DESKTOP_TEST_MANAGED` 覆盖 + 自动探测（打包安装 / dev `build/node`）；embed-exe-icon 的 winCodeSign 缓存改为 `DSH_DESKTOP_WINCODESIGN_CACHE` 覆盖 + `%LOCALAPPDATA%` 标准位置枚举。
+- **AGENTS.md 拆分**：主文件 82KB → 25KB（索引 + 红线清单，摆脱 harness 注入截断），完整机制细节移入 `docs/agents/` 四个主题文档（install-and-update / plugins-and-market / rpc-bridge / desktop-ui），主文件带显眼的文档地图。
+
 ## [1.9.2] - 2026-09-16
 
 ### 变更

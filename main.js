@@ -45,6 +45,9 @@ const net = require("net");
 const crypto = require("crypto");
 const pluginRecoveryLib = require("./plugin-recovery.js");
 const { extractDshUrl } = require("./url-extract.js");
+const { compareCoreVersions, isAtLeastByTriple, isNewer } = require("./core-version.js");
+const { pickShellAsset, parseAssetDigest } = require("./shell-asset.js");
+const { parseSettingsText } = require("./settings-json.js");
 
 const DEFAULT_PORT = 3080;
 
@@ -57,9 +60,10 @@ const SHELL_REPO = process.env.DSH_DESKTOP_SHELL_REPO || "MoonlitDropOfBlood/DSH
 /** GitHub API / release-download mirror prefixes (trailing slash REQUIRED),
  *  used ONLY as fallback when github.com is unreachable (国内网络). These are
  *  community transparent proxies — never trust them with unverified binaries:
- *  the shell installer downloaded through a mirror is still checked against
- *  nothing today (GitHub asset digests are not exposed here), so mirrors are
- *  attempted strictly in order and any HTTP failure moves to the next source.
+ *  the downloaded installer is verified against GitHub's per-asset sha256
+ *  digest BEFORE launch (releases published without a digest skip verification
+ *  and say so in the log). Mirrors are attempted strictly in order and any
+ *  HTTP failure — or a digest mismatch — moves to the next source.
  *  Set DSH_DESKTOP_SHELL_MIRRORS to a comma-separated list to override, or to
  *  an empty string to disable mirrors entirely. 方案 A (self-hosted OSS
  *  latest.json + direct links) lands by pointing DSH_DESKTOP_SHELL_REPO /
@@ -1018,9 +1022,8 @@ function prepareManagedDir() {
  * mixed-version incident. Unknown target → false (pnpm always works).
  */
 function targetLineSupportsNpm() {
-  const m = String(latestKnown || "").match(/^(\d+)\.(\d+)\.(\d+)(?:-[a-z]+\.(\d+))?$/);
-  if (!m) return false;
-  return compareVersions(`${m[1]}.${m[2]}.${m[3]}`, "0.1.2") >= 0;
+  // Triple-only semantics (an rc ON the 0.1.2 line counts) — core-version.js.
+  return isAtLeastByTriple(latestKnown, "0.1.2");
 }
 
 /** npm is not bundled — it comes from the user's PATH (or DSH_DESKTOP_NPM). */
@@ -1145,16 +1148,16 @@ function readInstalledVersion() {
  * version: older cores parse with strict commander (`program.parse` without
  * allowUnknownOption), so an unknown `--no-open` would ABORT their startup.
  * Version shape note: a final `0.1.0` (no rc suffix) is NEWER than every
- * `0.1.0-rc.N`, so compare the numeric triple first and only then the rc.
+ * `0.1.0-rc.N` — core-version.js's prerelease-aware compare encodes exactly
+ * that (locked by scripts/test-core-version.js; a drift here aborts old
+ * cores' startup).
  */
 function supportsNoOpen(base) {
   try {
     const json = JSON.parse(fs.readFileSync(path.join(base, "package.json"), "utf8"));
-    const m = String(json.version || "").match(/^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/);
-    if (!m) return false;
-    const cmp = compareVersions(`${m[1]}.${m[2]}.${m[3]}`, "0.1.0");
-    if (cmp !== 0) return cmp > 0;
-    return m[4] === undefined || Number(m[4]) >= 8;
+    // `--no-open` landed IN 0.1.0-rc.8, so the gate is "at or above rc.8":
+    // rc.8 itself qualifies, rc.7 does not, the final 0.1.0 outranks every rc.
+    return compareCoreVersions(json.version, "0.1.0-rc.8") >= 0;
   } catch {
     return false;
   }
@@ -1309,9 +1312,8 @@ function stagePackage(srcDir, name, dstDir, mode) {
  * crash. 0.1.1.x does not auto-mount (the insert row is required there).
  */
 function coreAutoMountsProfilePackages() {
-  const m = String(readInstalledVersion() || "").match(/^(\d+)\.(\d+)\.(\d+)(?:-[a-z]+\.(\d+))?$/);
-  if (!m) return false;
-  return compareVersions(`${m[1]}.${m[2]}.${m[3]}`, "0.1.2") >= 0;
+  // Triple-only semantics (an rc ON the 0.1.2 line counts) — core-version.js.
+  return isAtLeastByTriple(readInstalledVersion(), "0.1.2");
 }
 
 function prepareBundledMarket() {
@@ -1593,6 +1595,16 @@ function spawnDSH() {
       // Chain aborted before any child existed — release the restart guard
       // so a later Ctrl+Alt+R / panel retry can re-enter.
       restartRequested = false;
+      // Installer reported success but resolveDSHBin() still comes up empty
+      // (pseudo-success, or antivirus quarantined the tree): a bare return
+      // left the splash hanging forever with no panel and no way out.
+      if (!found && !quitRequested) {
+        showStartupError({
+          message: "未能定位可用的 DSH 核心",
+          detail: "安装流程结束后仍找不到 @deepseek-ai/dsh（安装器可能伪成功，或文件被杀软隔离）。\n可以重试安装，或退出后检查杀软隔离区。\n\n最近日志：\n" + logTail.slice(-20).join("\n"),
+          canChangePort: false
+        });
+      }
       return;
     }
     // Pre-flight port check: if the target port is already taken (another DSH
@@ -2222,11 +2234,11 @@ function settingsPath() {
 /** Raw persisted settings object (all fields, including plugin KV buckets). */
 function readRawSettings() {
   try {
-    // Strip a UTF-8 BOM: hand-edited files (Notepad, PowerShell Set-Content
-    // -Encoding utf8 on some hosts) often carry one, and a bare JSON.parse
-    // then throws — silently resetting EVERY setting to defaults.
-    const json = JSON.parse(fs.readFileSync(settingsPath(), "utf8").replace(/^﻿/, ""));
-    return (json && typeof json === "object" && !Array.isArray(json)) ? json : {};
+    // BOM strip + shape check live in settings-json.js (locked by
+    // scripts/test-settings-json.js): hand-edited files often carry a BOM,
+    // and a bare JSON.parse then throws — silently resetting EVERY setting
+    // to defaults (2026-09 incident).
+    return parseSettingsText(fs.readFileSync(settingsPath(), "utf8"));
   } catch {
     return {};
   }
@@ -2254,9 +2266,19 @@ function writeSettings(patch) {
     const next = { ...readRawSettings(), ...patch };
     fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
     fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2), "utf8");
+    return { ok: true };
   } catch (err) {
     log(`writeSettings failed: ${err.message}`);
+    return { ok: false, error: err.message };
   }
+}
+
+/** Attach a failed settings persist to the state returned to the renderer —
+ *  the settings UI toasts it instead of the write vanishing silently. */
+function withWriteError(state, write) {
+  return (write && write.ok === false)
+    ? { ...state, writeError: write.error || "设置保存失败" }
+    : state;
 }
 
 // ---- 插件设置 KV（phase-2 扩展点） -------------------------------------------
@@ -2385,7 +2407,11 @@ function startNotifyServer() {
         log(`task-notify bind failed on ${port}: ${err.message}; retrying`);
         tryListen(port + 1 + Math.floor(Math.random() * 5), attempts - 1);
       } else {
+        // Task notifications / tray contributions / float windows all ride on
+        // this bridge — surface the degradation (settings UI hint) instead of
+        // failing silently with only a log line.
         log(`task-notify bridge could not listen: ${err.message}`);
+        pushUpdateState();
       }
     });
     srv.listen(port, "127.0.0.1", () => {
@@ -3130,7 +3156,13 @@ function pushUpdateState() {
     allowFloatWindows: settings.allowFloatWindows,
     bundleMarket: settings.bundleMarket,
     coreChannel: settings.coreChannel,
-    updateAvailable: Boolean(installed && latestKnown && latestKnown !== installed)
+    // Prerelease-aware direction guard: a dist-tag rollback or a channel
+    // switch back (alpha → latest) must not flag an OLDER core as updatable —
+    // the old `latest !== installed` let auto-update silently downgrade.
+    updateAvailable: Boolean(installed && latestKnown && isNewer(latestKnown, installed)),
+    // False = the local RPC bridge never came up (task notifications, tray
+    // contributions and float windows are dead); the settings UI shows a hint.
+    notifyBridgeOk: Boolean(notifyServer)
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("dsh:update-state", state);
@@ -3530,7 +3562,9 @@ function checkForUpdatesOnStartup() {
     if (!latest) return;
     pushUpdateState();
     const installed = readInstalledVersion();
-    const hasUpdate = installed && latest !== installed;
+    // Direction guard: only a genuinely NEWER latest may trigger auto-update —
+    // never reinstall an older core after a tag rollback / channel switch.
+    const hasUpdate = Boolean(installed && isNewer(latest, installed));
     log(`update check: installed=${installed} latest=${latest}`);
     if (!hasUpdate) return;
     if (readSettings().autoUpdate) {
@@ -3656,6 +3690,19 @@ function createWindow() {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
+  // Navigation guard: the preload bridge (window controls, restartCore,
+  // settings writes, update triggers) is exposed to whatever page this window
+  // shows — a poisoned DSH page must not carry it to a foreign origin.
+  // loadURL/loadFile do NOT emit will-navigate, so the splash load and the
+  // initial core URL are unaffected; same-origin hops (incl. the ?token=… → /
+  // swap after auth) stay allowed — ANY path on the core's port is fine,
+  // everything else is blocked and logged.
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const port = effectivePort();
+    if (/^file:/i.test(url) || new RegExp(`^https?://(?:127\\.0\\.0\\.1|localhost):${port}(?:/|$)`, "i").test(url)) return;
+    event.preventDefault();
+    log(`blocked in-page navigation to ${url}`);
+  });
 }
 
 // Window-control IPC used by the custom title bar buttons.
@@ -3685,17 +3732,17 @@ ipcMain.handle("dsh:checkUpdate", () => new Promise((resolve) => {
   queryLatest(() => resolve(pushUpdateState()));
 }));
 ipcMain.handle("dsh:setAutoUpdate", (_e, value) => {
-  writeSettings({ autoUpdate: value === true });
-  return pushUpdateState();
+  const write = writeSettings({ autoUpdate: value === true });
+  return withWriteError(pushUpdateState(), write);
 });
 // Switch the core update channel (稳定版=latest / 体验版=next / 实验版=alpha).
 // Persists immediately; re-queries the channel's latest so updateAvailable and
 // the "最新" display follow the new tag. The next install/update uses it too.
 ipcMain.handle("dsh:setCoreChannel", (_e, value) => {
   const tag = CORE_CHANNELS.indexOf(value) >= 0 ? value : "latest";
-  writeSettings({ coreChannel: tag });
+  const write = writeSettings({ coreChannel: tag });
   queryLatest(() => pushUpdateState());
-  return pushUpdateState();
+  return withWriteError(pushUpdateState(), write);
 });
 ipcMain.handle("dsh:installUpdate", () => new Promise((resolve) => {
   try {
@@ -3754,7 +3801,9 @@ function shellVersionCurrent() {
   return app.getVersion();
 }
 
-/** Compare two dotted versions; >0 if a is newer than b. */
+/** Compare two dotted SHELL versions (v1.2.3 tags, no prereleases); >0 if a
+ *  is newer than b. DSH CORE versions must go through core-version.js instead
+ *  — this one is prerelease-insensitive, fine only for the shell's plain tags. */
 function compareVersions(a, b) {
   const pa = String(a || "0").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
   const pb = String(b || "0").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
@@ -3794,7 +3843,11 @@ function queryShellLatest(cb) {
             assets: assets.map((a) => ({
               name: a.name,
               size: a.size || 0,
-              browser_download_url: a.browser_download_url
+              browser_download_url: a.browser_download_url,
+              // GitHub exposes a sha256 digest per release asset (the same
+              // field the whaleharbor-promo plugin verifies) — the download
+              // flow pins the installer to it before launch.
+              digest: typeof a.digest === "string" ? a.digest : ""
             }))
           });
         } catch {
@@ -3811,33 +3864,11 @@ function queryShellLatest(cb) {
   attempt(0);
 }
 
-/** Pick the installer asset matching the current platform/arch. */
+/** Pick the installer asset matching the current platform/arch (rules live in
+ *  shell-asset.js — tested by scripts/test-shell-asset.js, incl. the §11
+ *  arm64/x64 dmg trap). */
 function shellAssetForPlatform(assets) {
-  const plat = process.platform;
-  const arch = process.arch;
-  if (plat === "win32") {
-    return assets.find((a) => /\.exe$/i.test(a.name)) || null;
-  }
-  if (plat === "darwin") {
-    if (arch === "arm64") {
-      const arm = assets.find((a) => /arm64.*\.dmg$/i.test(a.name));
-      if (arm) return arm;
-    } else {
-      // x64: prefer an explicitly-x64 dmg, then any non-arm64 dmg
-      const x = assets.find((a) => /(x64|x86_64|intel).*\.dmg$/i.test(a.name));
-      if (x) return x;
-      const nonArm = assets.find((a) => /\.dmg$/i.test(a.name) && !/arm64/i.test(a.name));
-      if (nonArm) return nonArm;
-    }
-    return assets.find((a) => /\.dmg$/i.test(a.name)) || null;
-  }
-  if (plat === "linux") {
-    return assets.find((a) => /\.AppImage$/i.test(a.name))
-      || assets.find((a) => /\.deb$/i.test(a.name))
-      || assets.find((a) => /\.rpm$/i.test(a.name))
-      || null;
-  }
-  return null;
+  return pickShellAsset(assets, process.platform, process.arch);
 }
 
 /** Download url → dest following redirects, with onProgress(got, total). */
@@ -3866,6 +3897,20 @@ function downloadFile(url, dest, onProgress, cb) {
   try { follow(url, 5); } catch (e) { cb(e); }
 }
 
+/** sha256 of a file (lowercase hex) — verifies the downloaded shell installer
+ *  against the GitHub release asset digest before it is ever executed. */
+function sha256File(file, cb) {
+  try {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(file);
+    stream.on("data", (c) => hash.update(c));
+    stream.on("error", (e) => { try { stream.close(); } catch { /* ignore */ } cb(e); });
+    stream.on("end", () => { try { stream.close(); } catch { /* ignore */ } cb(null, hash.digest("hex")); });
+  } catch (e) {
+    cb(e);
+  }
+}
+
 function sendShellProgress(p) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("dsh:shellDownloadProgress", p);
@@ -3879,12 +3924,22 @@ function launchShellInstaller(file) {
   }
   log(`launching shell installer: ${file}`);
   shell.openPath(file).then((err) => {
-    if (err) log(`open installer failed: ${err}`);
-  }).catch(() => {});
-  if (process.platform === "win32") {
-    // The NSIS installer needs the app closed to replace the running exe.
-    setTimeout(() => { isQuitting = true; app.quit(); }, 2000);
-  }
+    if (err) {
+      // AV interception / quarantined file: quitting here used to strand the
+      // user with a vanished app and nothing on screen — surface the error in
+      // the settings UI and keep the shell alive instead.
+      log(`open installer failed: ${err}`);
+      sendShellProgress({ error: `无法启动安装包：${err}` });
+      return;
+    }
+    if (process.platform === "win32") {
+      // The NSIS installer needs the app closed to replace the running exe.
+      setTimeout(() => { isQuitting = true; app.quit(); }, 2000);
+    }
+  }).catch((e) => {
+    log(`open installer threw: ${(e && e.message) || e}`);
+    sendShellProgress({ error: `无法启动安装包：${(e && e.message) || "未知错误"}` });
+  });
 }
 
 // Shell self-update IPC (driven by the 桌面版 settings UI).
@@ -3914,17 +3969,36 @@ ipcMain.handle("dsh:downloadShellUpdate", () => new Promise((resolve) => {
       resolve({ ok: false, error: `当前平台（${process.platform}/${process.arch}）没有可下载的安装包` });
       return;
     }
-    const dest = path.join(app.getPath("temp"), asset.name);
-    // 多源兜底：GitHub 直链 -> 各镜像前缀。任一源失败（超时/非 200）自动切下一个。
+    // Mirrors are community proxies — never execute an unverified binary.
+    // When the release publishes an asset digest, the downloaded file is
+    // pinned to it: a mismatch fails the SOURCE and the file is discarded.
+    // basename() also closes the theoretical "../" escape out of temp via a
+    // mirror-controlled asset name.
+    const digestHex = parseAssetDigest(asset.digest);
+    const safeName = path.basename(String(asset.name || ""));
+    if (!safeName || safeName === "." || safeName === "..") {
+      resolve({ ok: false, error: "安装包文件名异常，已取消下载" });
+      return;
+    }
+    const dest = path.join(app.getPath("temp"), safeName);
+    // 多源兜底：GitHub 直链 -> 各镜像前缀。任一源失败（超时/非 200/摘要不符）自动切下一个。
     const sources = [
       asset.browser_download_url,
       ...SHELL_MIRRORS.map((m) => m + asset.browser_download_url),
     ];
-    log(`downloading shell ${info.version}: ${asset.name}`);
+    log(`downloading shell ${info.version}: ${safeName}${digestHex ? " (sha256 digest pinned)" : " (release has no asset digest — verification skipped)"}`);
     sendShellProgress({ percent: 0, downloadedMB: 0, totalMB: (asset.size || 0) / 1024 / 1024 });
+    let digestFailed = false;
+    const finishOk = () => {
+      sendShellProgress({ percent: 100, phase: "done" });
+      launchShellInstaller(dest);
+      resolve({ ok: true, file: dest });
+    };
     const attempt = (i) => {
       if (i >= sources.length) {
-        const errText = "所有下载源均失败（GitHub 与镜像均不可达），请检查网络后重试";
+        const errText = digestFailed
+          ? "安装包 SHA-256 校验失败（下载内容与 GitHub 发布摘要不符，已丢弃）。请稍后重试，或从 Releases 页手动下载"
+          : "所有下载源均失败（GitHub 与镜像均不可达），请检查网络后重试";
         log(`shell download failed: ${errText}`);
         sendShellProgress({ error: errText });
         resolve({ ok: false, error: errText });
@@ -3942,9 +4016,19 @@ ipcMain.handle("dsh:downloadShellUpdate", () => new Promise((resolve) => {
           attempt(i + 1);
           return;
         }
-        sendShellProgress({ percent: 100, phase: "done" });
-        launchShellInstaller(dest);
-        resolve({ ok: true, file: dest });
+        if (!digestHex) { finishOk(); return; }
+        sendShellProgress({ percent: 100, phase: "verify" });
+        sha256File(dest, (hashErr, hex) => {
+          if (hashErr || hex !== digestHex) {
+            digestFailed = true;
+            log(`shell download digest MISMATCH via ${sources[i]}${hashErr ? ` (${hashErr.message})` : `: got sha256:${hex || "?"}`}`);
+            try { fs.rmSync(dest, { force: true }); } catch { /* forensics over tidiness */ }
+            attempt(i + 1);
+            return;
+          }
+          log(`shell installer digest verified (sha256:${hex.slice(0, 16)}…, ${dest})`);
+          finishOk();
+        });
       });
     };
     attempt(0);

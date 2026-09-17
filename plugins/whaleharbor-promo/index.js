@@ -12,8 +12,10 @@
  *   2. Background installer download to <home>/Downloads: multi-source
  *      fallback [browser_download_url, mirror, mirror], redirect-following
  *      streaming https, resumable-less retries, then SHA-256 verification
- *      against the asset `digest` published by GitHub. Failure to verify =
- *      error state (file left for inspection, never launched).
+ *      against the asset `digest` published by GitHub. A digest mismatch
+ *      QUARANTINES the file (rename/delete) — it matches state.total, so
+ *      leaving it in place would make the size-match short-circuit re-verify
+ *      the same bad bytes on every retry — and never gets launched.
  *   3. Standalone lite-client window: locate a Chromium browser per platform
  *      (Chrome/Edge on Windows incl. ProgramFiles(x86)/LocalAppData and a
  *      `where` fallback; Chrome/Edge/Brave/Chromium .app bundles on macOS;
@@ -135,6 +137,9 @@ const state = {
   phase: "idle", // idle | resolving | downloading | verifying | done | error
   version: "", tag: "", name: "", total: 0, got: 0,
   file: "", digest: "", verified: false, error: "", source: "",
+  // Asset-selection target while resolving: a late UA-CH arch correction from
+  // any tab re-pins these (see begin), so Apple Silicon never starts on x64.
+  pendingPlatform: "", pendingArch: "",
 };
 
 function pub() {
@@ -145,8 +150,15 @@ function pub() {
 /** Download url -> dest following redirects; tries each source until one succeeds. */
 function downloadMulti(urls, dest, cb) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
+  // Settle-once guard: after a successful finish, a late res "error" (or the
+  // 30s timeout firing on a socket that already delivered everything) used to
+  // trigger attempt(i+1) -> a SECOND cb -> begin's callback twice -> a
+  // writeHead-after-end throw inside the DSH host process.
+  let settled = false;
+  const once = (err) => { if (settled) return; settled = true; cb(err); };
   const attempt = (i) => {
-    if (i >= urls.length) { cb(new Error("所有下载源均失败")); return; }
+    if (settled) return;
+    if (i >= urls.length) { once(new Error("所有下载源均失败")); return; }
     state.source = urls[i];
     const follow = (u, hops) => {
       const req = https.get(u, { headers: { "User-Agent": UA } }, (res) => {
@@ -163,7 +175,7 @@ function downloadMulti(urls, dest, cb) {
         res.on("data", (c) => { got += c.length; state.got = got; });
         res.pipe(out);
         out.on("error", () => { req.destroy(); attempt(i + 1); });
-        out.on("finish", () => { out.close(() => cb(null)); });
+        out.on("finish", () => { out.close(() => once(null)); });
         res.on("error", () => { out.destroy(); attempt(i + 1); });
       });
       req.setTimeout(30000, () => { req.destroy(); attempt(i + 1); });
@@ -184,18 +196,44 @@ function sha256File(file, cb) {
   } catch (e) { cb(e); }
 }
 
+/** Rename (or, failing that, delete) a digest-mismatched download. The bad
+ *  file matches state.total, so leaving it in place makes the size-match
+ *  short-circuit re-verify the SAME bad bytes on every retry — the UI's 重试
+ *  button would loop forever on a dead end. */
+function quarantineFile(file) {
+  try { fs.renameSync(file, file + ".sha256-mismatch"); return; } catch { /* fall through */ }
+  try { fs.rmSync(file, { force: true }); } catch { /* keep for forensics */ }
+}
+
 function begin(args, cb) {
   const platform = (args && args.platform) || process.platform;
   const arch = (args && args.arch) || process.arch;
-  if (state.phase === "downloading" || state.phase === "verifying" || state.phase === "resolving") { cb(pub()); return; }
+  if (state.phase === "downloading" || state.phase === "verifying") { cb(pub()); return; }
+  if (state.phase === "resolving") {
+    // The UA-CH arch probe resolves ASYNC and can land after the first
+    // /begin (or a corrected probe re-begins — see client.js): while still
+    // resolving, adopt the latest requested platform/arch — the
+    // fetchReleaseMeta callback below re-picks the asset from these fields,
+    // so an Apple Silicon tab never gets pinned to the x64 dmg.
+    if (args && args.arch && args.arch !== state.pendingArch) {
+      state.pendingPlatform = platform;
+      state.pendingArch = arch;
+    }
+    cb(pub());
+    return;
+  }
+  state.pendingPlatform = platform;
+  state.pendingArch = arch;
   state.phase = "resolving";
   state.error = "";
   fetchReleaseMeta((meta) => {
+    const wantPlatform = state.pendingPlatform || platform;
+    const wantArch = state.pendingArch || arch;
     if (!meta) { state.phase = "error"; state.error = "无法获取发布信息（GitHub 及所有镜像均不可达）"; cb(pub()); return; }
-    const asset = pickAsset(meta.assets, platform, arch);
+    const asset = pickAsset(meta.assets, wantPlatform, wantArch);
     if (!asset || !asset.browser_download_url) {
       state.phase = "error";
-      state.error = `最新发布（${meta.tag_name || "?"}）没有匹配 ${platform}/${arch} 的安装包`;
+      state.error = `最新发布（${meta.tag_name || "?"}）没有匹配 ${wantPlatform}/${wantArch} 的安装包`;
       cb(pub()); return;
     }
     state.version = String(meta.tag_name || "").replace(/^v/i, "");
@@ -214,7 +252,8 @@ function begin(args, cb) {
           if (!e && hex && hex === state.digest.replace(/^sha256:/i, "").toLowerCase()) {
             state.verified = true; state.phase = "done";
           } else {
-            state.phase = "error"; state.error = "SHA-256 校验失败，文件可能损坏或被篡改，请删除后重试";
+            quarantineFile(state.file);
+            state.phase = "error"; state.error = "SHA-256 校验失败，损坏文件已丢弃，点「重试」将重新下载";
           }
           cb(pub());
         });
@@ -332,7 +371,13 @@ function startServer(ctx) {
     if (req.headers["x-wh-promo-token"] !== token) { res.writeHead(401, { "content-type": "application/json" }); res.end("{}"); return; }
     const url = new URL(req.url, "http://127.0.0.1");
     const json = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
-    if (url.pathname === "/state" && req.method === "GET") { json(200, pub()); return; }
+    if (url.pathname === "/state" && req.method === "GET") {
+      // notifySeq lets a freshly (re)opened page pin its /notify cursor at
+      // "now" instead of replaying the backlog accumulated while it was
+      // closed (up to 50 stale notifications used to pop at once).
+      json(200, Object.assign(pub(), { notifySeq }));
+      return;
+    }
     if (url.pathname === "/notify" && req.method === "GET") {
       const since = Number(url.searchParams.get("since")) || 0;
       json(200, { items: notifyFeed.filter((n) => n.seq > since) });

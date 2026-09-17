@@ -1,0 +1,39 @@
+name: CI
+
+# push/PR 上的快速回归门禁：跑 npm test 收拢的全部零依赖纯 Node 测试
+# （url-extract 的 token 提取、plugin-recovery 的故障日志解析器、core-version
+# 的版本比较语义、shell-asset 的资产选择、settings-json 的 BOM 剥离、宣传页
+# 守卫），外加对所有追踪 .js 的 node --check 语法清扫。
+# 发版构建仍走 build-installers.yml（v* 标签触发），本文件与其零交集。
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (node 20)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # 全部测试零 npm 依赖，无需 npm ci。语法清扫对应 AGENTS「验证一个改动」
+      # 的第一步（node --check 所有改动过的 JS），在这里自动化。
+      - name: Syntax check all tracked JS
+        shell: bash
+        run: |
+          status=0
+          while IFS= read -r f; do
+            node --check "$f" || status=1
+          done < <(git ls-files '*.js')
+          exit $status
+      - name: npm test
+        run: npm test

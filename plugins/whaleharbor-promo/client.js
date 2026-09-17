@@ -126,23 +126,32 @@ window.__ModuleLoader__.load({
     }
 
     function detectEnv() {
-      let ua = "";
-      try { ua = String(window.navigator.userAgent || ""); } catch (e) { /* ignore */ }
-      let platform = "win";
-      if (/Macintosh|Mac OS X/i.test(ua)) platform = "mac";
-      else if (/Linux|Android/i.test(ua) && !/Windows/i.test(ua)) platform = "linux";
-      let arch = /arm64|aarch64|\bARM\b|armv/i.test(ua) ? "arm64" : "x64";
+      const env = (() => {
+        let ua = "";
+        try { ua = String(window.navigator.userAgent || ""); } catch (e) { /* ignore */ }
+        let platform = "win";
+        if (/Macintosh|Mac OS X/i.test(ua)) platform = "mac";
+        else if (/Linux|Android/i.test(ua) && !/Windows/i.test(ua)) platform = "linux";
+        let arch = /arm64|aarch64|\bARM\b|armv/i.test(ua) ? "arm64" : "x64";
+        let standalone = false;
+        try { standalone = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches; } catch (e) { /* ignore */ }
+        const inDesktop = !!(window.dshDesktop);
+        return { platform: platform, arch: arch, standalone: standalone, inDesktop: inDesktop, archProbe: null };
+      })();
+      // UA-CH probe: macOS/Windows UAs freeze "x64" into the UA string, so the
+      // architecture must be corrected asynchronously. (The old code assigned
+      // an out-of-scope `env` inside the callback — the ReferenceError was
+      // swallowed by .catch, so the correction NEVER landed.) The probe
+      // promise is returned so ensureBegin can wait a bounded time for it and
+      // re-begin when it lands late; the server re-picks the asset meanwhile.
       try {
         if (window.navigator.userAgentData && window.navigator.userAgentData.getHighEntropyValues) {
-          window.navigator.userAgentData.getHighEntropyValues(["architecture"]).then((hh) => {
-            env.arch = hh && hh.architecture === "arm" ? "arm64" : "x64";
-          }).catch(() => {});
+          env.archProbe = window.navigator.userAgentData.getHighEntropyValues(["architecture"])
+            .then((hh) => { env.arch = hh && hh.architecture === "arm" ? "arm64" : "x64"; return env.arch; })
+            .catch(() => env.arch);
         }
       } catch (e) { /* ignore */ }
-      let standalone = false;
-      try { standalone = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches; } catch (e) { /* ignore */ }
-      const inDesktop = !!(window.dshDesktop);
-      return { platform: platform, arch: arch, standalone: standalone, inDesktop: inDesktop };
+      return env;
     }
 
     function apply(ctx) {
@@ -196,19 +205,40 @@ window.__ModuleLoader__.load({
       }
 
       let began = false;
-      function ensureBegin() {
-        if (began) return;
-        began = true;
-        api("/begin", { platform: env.platform, arch: env.arch }).then((s) => {
+      let begunArch = null;
+      function beginNow() {
+        begunArch = env.arch;
+        return api("/begin", { platform: env.platform, arch: env.arch }).then((s) => {
           if (s && s.phase) { S.st = s; emit(); }
         }).catch(() => {});
       }
+      function ensureBegin() {
+        if (began) return;
+        began = true;
+        if (!env.archProbe) { beginNow(); return; }
+        // UA-CH lands async (and never on Safari — no userAgentData): race it
+        // with a bounded wait so a slow probe can't stall the funnel, then if
+        // it lands LATE with a corrected arch, re-begin — the server re-picks
+        // the asset while still resolving (never once downloading).
+        Promise.race([env.archProbe, new Promise((r) => setTimeout(r, 800))]).then(beginNow, beginNow);
+        env.archProbe.then(() => {
+          if (began && env.arch !== begunArch) beginNow();
+        });
+      }
 
       let since = 0;
+      let notifyInited = false;
       const timers = [];
       timers.push(setInterval(() => {
         api("/state").then((s) => {
           if (!s || !s.phase) return;
+          if (!notifyInited && typeof s.notifySeq === "number") {
+            // Skip notifications accumulated while this page was closed: pin
+            // the cursor at "now" so the next /notify only surfaces genuinely
+            // new events (a reopened tab used to replay up to 50 stale ones).
+            since = Math.max(since, s.notifySeq);
+            notifyInited = true;
+          }
           S.st = s;
           emit();
           if (s.phase === "done" && lsGet("whprom.donePrompted") !== "1" && !S.open) {

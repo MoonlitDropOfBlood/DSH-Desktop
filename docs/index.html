@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.8.2 亮点</h4><ul><li><strong>金刚键重设计（DSH 0.1.5+）</strong>：最小化 / 最大化 / 关闭改为与 DSH 原生按钮同规格的角落小组件，根治与新版会话头部、右侧栏按钮的遮挡冲突，模式按已装核心版本自动判定。</li><li><strong>老核心零影响</strong>：≤0.1.4 完全保持原有窗口控制条与拖拽行为。</li></ul>',
+      'rel.fallback': '<h4>v1.9.3 亮点</h4><ul><li><strong>壳自更新完整性校验</strong>：安装包下载完成后对 GitHub 资产 digest 做 SHA-256 校验才允许启动，镜像代理不再被无条件信任；安装包被杀软拦截时不再静默退出应用。</li><li><strong>更新方向守卫 + 版本比较统一</strong>：dist-tag 回移或渠道切回绝不会把旧版核心当"更新"装回去；四处手写版本比较收敛为 core-version.js 单一实现。</li><li><strong>鲸港 Web 引导插件修复</strong>：SHA-256 校验失败死循环、通知积压回放、Apple Silicon 架构探测失效三个问题清零。</li><li><strong>工程化从 0 到 1</strong>：npm test + push/PR CI 上线，AGENTS.md 拆分瘦身（82KB→25KB）。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.8.2 highlights</h4><ul><li><strong>Redesigned window controls (DSH 0.1.5+)</strong>: minimize / maximize / close become a corner widget in the same compact style as DSH native icon buttons, fixing occlusion conflicts with the new conversation header and right sidebar panel; the mode is detected from the installed core version.</li><li><strong>Older cores unaffected</strong>: 0.1.4 and below keep the existing control strip and window-drag behavior.</li></ul>',
+      'rel.fallback': '<h4>v1.9.3 highlights</h4><ul><li><strong>Shell self-update integrity check</strong>: downloaded installers are now verified against the GitHub asset digest (SHA-256) before launch — mirror proxies are no longer trusted blindly; an AV-blocked installer no longer quits the app silently.</li><li><strong>Update direction guard + unified version comparison</strong>: a dist-tag rollback or channel switch can never reinstall an OLDER core; four hand-rolled version comparisons converge into core-version.js.</li><li><strong>whaleharbor-promo fixes</strong>: SHA-256 retry dead loop, notification backlog replay, and Apple Silicon arch detection all fixed.</li><li><strong>Engineering from zero</strong>: npm test + push/PR CI, AGENTS.md split (82KB→25KB).</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.8.2';
+  var latestVer = 'v1.9.3';
   var lastRelease = null;
 
   function escHtml(s) {

@@ -312,6 +312,11 @@ window.__ModuleLoader__.load({
 				return modern ? PLACEMENT.MODERN : PLACEMENT.LEGACY;
 			};
 			const notify = () => {
+				// The version signal is authoritative: once it has answered,
+				// compute() no longer consults the DOM at all — further fallback
+				// notifications (3 full-document querySelectors each) are pure
+				// overhead, so short-circuit here.
+				if (versionModern !== null) return;
 				const next = compute();
 				if (next === placement) return;
 				placement = next;
@@ -325,9 +330,10 @@ window.__ModuleLoader__.load({
 				},
 				setVersion: (v) => {
 					const parsed = isModernVersion(v);
-					if (parsed === null || parsed === versionModern) return;
+					if (parsed === null || parsed === versionModern) return parsed;
 					versionModern = parsed;
 					notify();
+					return parsed;
 				},
 				notifyDomChanged: notify
 			};
@@ -386,72 +392,95 @@ window.__ModuleLoader__.load({
 				// that shifts header/sidebar padding cannot make a drag strip
 				// cover clickable content again. Keep everything in sync as the
 				// sidebar resizes / collapses or the window resizes.
-				const overlay = document.querySelector("[data-shell-overlay]");
-				const frame = overlay ? overlay.parentElement : null;
-				const sidebar = frame ? frame.firstElementChild : null;
+				let sidebar = null;
+				const resolveSidebar = () => {
+					const overlay = document.querySelector("[data-shell-overlay]");
+					const frame = overlay ? overlay.parentElement : null;
+					sidebar = frame ? frame.firstElementChild : null;
+					return sidebar;
+				};
+				resolveSidebar();
+				// One measured pass per frame: every trigger (sidebar ResizeObserver,
+				// host-subtree mutations, window resize) coalesces here, and within
+				// a pass ALL reads happen before ANY write — the old interleaved
+				// read→write→read sequence forced several synchronous reflows per
+				// sync.
+				let raf = 0;
+				let ro = null;
 				const sync = () => {
-					const left = sidebar ? Math.round(sidebar.getBoundingClientRect().right) : 0;
-					host.style.left = left + "px";
-					// Left edge of the LEFTMOST control group: the drag region
-					// ends here. LEGACY: the capsule / 44px buttons; MODERN: the
-					// corner group.
+					// Self-heal: when the sidebar node we measured was unmounted (a
+					// DSH update rebuilding the AppFrame) its rect reads all-zero —
+					// re-resolve instead of silently sliding the strip to left:0,
+					// and move the ResizeObserver onto the new node.
+					if (!sidebar || !sidebar.isConnected) {
+						const prev = sidebar;
+						resolveSidebar();
+						if (sidebar && sidebar !== prev && typeof ResizeObserver !== "undefined") {
+							if (ro) ro.disconnect();
+							ro = new ResizeObserver(schedule);
+							ro.observe(sidebar);
+						}
+					}
+					// ---- reads ----
+					const vw = window.innerWidth;
+					let left = 0;
+					const sidebarRect = sidebar ? sidebar.getBoundingClientRect() : null;
+					if (sidebarRect && (sidebarRect.right > 0 || sidebarRect.width > 0)) {
+						left = Math.round(sidebarRect.right);
+					}
 					let firstBtnLeft = null;
 					for (const el of host.querySelectorAll(".dsh-desktop-btn, .dsh-desktop-sessionlog, .dsh-desktop-corner-group")) {
 						const r = el.getBoundingClientRect();
 						if (r.width > 0 && (firstBtnLeft === null || r.left < firstBtnLeft)) firstBtnLeft = r.left;
 					}
-					const drag = host.querySelector(".dsh-desktop-drag");
-					if (drag) {
-						drag.style.right = (firstBtnLeft === null ? 0 : Math.max(0, window.innerWidth - firstBtnLeft)) + "px";
-						drag.style.height = topClearance(document.querySelector('[data-slot="conversation.session.header"]'), DRAG_STRIP_MAX_MAIN) + "px";
-					}
-					// Sidebar drag strip: covers the empty area ABOVE the sidebar's
-					// brand/logo row (the window is frameless — on macOS there is no
-					// native title bar to grab anywhere). It extends leftwards out
-					// of the strip (right:100%) across the sidebar's full width.
-					const dragSide = host.querySelector(".dsh-desktop-drag-side");
-					if (dragSide) {
-						dragSide.style.width = left + "px";
-						dragSide.style.height = (left > 0 && sidebar ? topClearance(sidebar) : 0) + "px";
-					}
-					// Publish the MODERN corner group's width for the 0.1.5+
-					// right-panel chrome clearance rule: when the right sidebar
-					// is OPEN, its dock tab strip's trailing controls
-					// (fullscreen/collapse, data-sidebar-right-mode / -toggle)
-					// sit at the window's top-right corner — exactly where the
-					// corner group lives — so their margin-right pushes them
-					// clear of it. Zero on legacy cores (no corner group
-					// rendered there); the var's only consumer is an attribute
-					// that exists on 0.1.5+ DOM anyway.
+					const headerEl = document.querySelector('[data-slot="conversation.session.header"]');
+					const mainH = topClearance(headerEl, DRAG_STRIP_MAX_MAIN);
+					const sideH = (left > 0 && sidebar) ? topClearance(sidebar) : 0;
 					let clear = 0;
 					const group = host.querySelector(".dsh-desktop-corner-group");
 					if (group) {
 						const r = group.getBoundingClientRect();
-						if (r.width > 0) clear = Math.max(0, window.innerWidth - r.left) + 8;
+						if (r.width > 0) clear = Math.max(0, vw - r.left) + 8;
+					}
+					// ---- writes ----
+					host.style.left = left + "px";
+					const drag = host.querySelector(".dsh-desktop-drag");
+					if (drag) {
+						drag.style.right = (firstBtnLeft === null ? 0 : Math.max(0, vw - firstBtnLeft)) + "px";
+						drag.style.height = mainH + "px";
+					}
+					const dragSide = host.querySelector(".dsh-desktop-drag-side");
+					if (dragSide) {
+						dragSide.style.width = left + "px";
+						dragSide.style.height = sideH + "px";
 					}
 					if (document.documentElement) {
 						document.documentElement.style.setProperty("--dsh-desktop-controls-clear", clear + "px");
 					}
 				};
+				const schedule = () => {
+					if (raf) return;
+					raf = requestAnimationFrame(() => { raf = 0; sync(); });
+				};
 				sync();
-				let ro = null;
 				if (typeof ResizeObserver !== "undefined" && sidebar) {
-					ro = new ResizeObserver(sync);
+					ro = new ResizeObserver(schedule);
 					ro.observe(sidebar);
 				}
 				// Re-measure when the rendered control set changes — placement
 				// flips swap the button groups, and on legacy cores the Session
 				// log capsule appears/disappears as a conversation opens/closes
 				// — so the drag region and the panel clearance never lag the
-				// buttons.
+				// buttons. Bursts coalesce into one rAF pass (above).
 				let mo = null;
 				if (typeof MutationObserver !== "undefined") {
-					mo = new MutationObserver(sync);
+					mo = new MutationObserver(schedule);
 					mo.observe(host, { childList: true, subtree: true });
 				}
-				window.addEventListener("resize", sync);
+				window.addEventListener("resize", schedule);
 				return () => {
-					window.removeEventListener("resize", sync);
+					if (raf) cancelAnimationFrame(raf);
+					window.removeEventListener("resize", schedule);
 					if (ro) ro.disconnect();
 					if (mo) mo.disconnect();
 				};
@@ -1072,6 +1101,12 @@ window.__ModuleLoader__.load({
 			let disposed = false;
 			const sync = function () {
 				if (disposed) return;
+				// Early exit: the settings dialog is closed almost all of the time,
+				// but this observer used to run a full-document selector sweep on
+				// EVERY body mutation — characterData included, i.e. dozens of
+				// sweeps per second while an answer streams.
+				const nav = document.querySelector('[role="dialog"] nav');
+				if (!nav) return;
 				const buttons = document.querySelectorAll('[role="dialog"] nav button');
 				for (let i = 0; i < buttons.length; i++) {
 					const button = buttons[i];
@@ -1079,8 +1114,10 @@ window.__ModuleLoader__.load({
 					for (let j = 0; j < entries.length; j++) {
 						const entry = entries[j];
 						if (entry.label.length > 0 && text === entry.label) {
-							button.setAttribute(entry.marker, "");
-						} else {
+							// Skip redundant writes — each setAttribute re-triggers
+							// layout and (attribute-observing) observers downstream.
+							if (!button.hasAttribute(entry.marker)) button.setAttribute(entry.marker, "");
+						} else if (button.hasAttribute(entry.marker)) {
 							button.removeAttribute(entry.marker);
 						}
 					}
@@ -1128,20 +1165,35 @@ window.__ModuleLoader__.load({
 			// plus a body observer for the live DOM markers (fallback while the
 			// version promise resolves).
 			placementStore = createPlacementStore();
-			if (isDesktop && hasBridge("getUpdateState")) {
-				bridge().getUpdateState()
-					.then((s) => { if (s && typeof s.installed === "string") placementStore.setVersion(s.installed); })
-					.catch(() => { /* keep the DOM fallback */ });
-			}
+			// DOM-marker fallback observer: feeds the store only while the
+			// bridge's version promise is unresolved. Once the version ANSWERS
+			// (parseable), the store ignores DOM input entirely and this body-wide
+			// observer (3 full-document querySelectors per mutation) is pure
+			// overhead for the rest of the session — detach it.
+			let domFallbackObserver = null;
+			const detachDomFallback = () => {
+				if (domFallbackObserver) {
+					domFallbackObserver.disconnect();
+					domFallbackObserver = null;
+				}
+			};
 			if (typeof MutationObserver !== "undefined" && typeof ctx.effect === "function") {
 				ctx.effect(() => {
-					const mo = new MutationObserver(() => placementStore.notifyDomChanged());
-					mo.observe(document.body, {
+					domFallbackObserver = new MutationObserver(() => placementStore.notifyDomChanged());
+					domFallbackObserver.observe(document.body, {
 						childList: true, subtree: true, attributes: true,
 						attributeFilter: ["data-sidebar-right-open"]
 					});
-					return () => mo.disconnect();
+					return () => detachDomFallback();
 				});
+			}
+			if (isDesktop && hasBridge("getUpdateState")) {
+				bridge().getUpdateState()
+					.then((s) => {
+						if (!(s && typeof s.installed === "string")) return;
+						if (placementStore.setVersion(s.installed) !== null) detachDomFallback();
+					})
+					.catch(() => { /* keep the DOM fallback */ });
 			}
 
 			ctx.slots.inject("shell.overlay", () => ctx.slots.register(

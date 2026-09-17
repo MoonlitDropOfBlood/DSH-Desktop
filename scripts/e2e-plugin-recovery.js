@@ -21,9 +21,26 @@ const path = require("path");
 const os = require("os");
 
 const ROOT = path.join(__dirname, "..");
-const NODE = "D:\\Application\\DeepSeek Harness Desktop\\resources\\node\\win32-x64\\node.exe";
-const BIN = path.join(process.env.APPDATA, "DeepSeek Harness Desktop", "dsh", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-const MANAGED_DIR = path.join(process.env.APPDATA, "DeepSeek Harness Desktop", "dsh");
+// Runtime paths: env-overridable so the script survives any machine (the old
+// literals hard-coded one install dir + one username). Fallback order for the
+// Node runtime: DSH_DESKTOP_TEST_NODE → packaged install → dev fetch:node.
+const NODE = process.env.DSH_DESKTOP_TEST_NODE
+  || [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "DeepSeek Harness Desktop", "resources", "node", "win32-x64", "node.exe"),
+    path.join(ROOT, "build", "node", "win32-x64", "node.exe")
+  ].find((p) => p && fs.existsSync(p))
+  || path.join(ROOT, "build", "node", "win32-x64", "node.exe");
+const MANAGED_DIR = process.env.DSH_DESKTOP_TEST_MANAGED
+  || path.join(process.env.APPDATA || "", "DeepSeek Harness Desktop", "dsh");
+const BIN = path.join(MANAGED_DIR, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+if (!fs.existsSync(NODE)) {
+  console.error(`node runtime not found at ${NODE} — set DSH_DESKTOP_TEST_NODE (or run npm run fetch:node)`);
+  process.exit(1);
+}
+if (!fs.existsSync(BIN)) {
+  console.error(`DSH core not found at ${BIN} — install the shell once, or set DSH_DESKTOP_TEST_MANAGED`);
+  process.exit(1);
+}
 const ELECTRON = path.join(ROOT, "node_modules", "electron", "dist", "electron.exe");
 const PORT = 3214;
 const BASE = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-e2e-recovery-"));
