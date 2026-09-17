@@ -946,7 +946,7 @@ function rmTreeVerified(target, label, attempts = 4) {
  * (npm/cli#9459, unfixed as of npm 11.19) instead of a clean error.
  */
 function dirHasForeignInstallerArtifacts(nm) {
-  let entries = [];
+  let entries;
   try { entries = fs.readdirSync(nm); } catch { return false; }
   if (entries.includes(".pnpm") || entries.includes(".modules.yaml")) return true;
   for (const e of entries) {
@@ -1273,11 +1273,25 @@ function stagePackage(srcDir, name, dstDir, mode) {
   const src = path.join(srcDir, name);
   const dst = path.join(dstDir, name);
   if (!fs.existsSync(src)) return;
-  if (mode !== "always" && fs.existsSync(dst)) {
+  if (fs.existsSync(dst)) {
     try {
       const sv = majorOf(JSON.parse(fs.readFileSync(path.join(src, "package.json"), "utf8")).version);
       const dv = majorOf(JSON.parse(fs.readFileSync(path.join(dst, "package.json"), "utf8")).version);
-      if (sv && dv && sv === dv) return; // compatible copy already present
+      const sameMajor = sv && dv && sv === dv;
+      // "compatible" (dependency fills): only fill in on missing/major-mismatch —
+      // never clobber a compatible copy another plugin may rely on (pnpm may
+      // manage the profile's node_modules).
+      if (mode !== "always" && sameMajor) return;
+      // "always" (dshmarket — the shell OWNS this copy): skip the restage when
+      // the major matches. The staged copy only ever changes with the shell
+      // itself, so same-major == compatible; a pnpm prune that deletes it still
+      // self-heals via the existsSync check above. Avoids a full rm+recopy on
+      // EVERY spawn — that sync IO sits on the restart chain (AGENTS §2b exit
+      // latency) for zero benefit.
+      if (mode === "always" && sameMajor) {
+        log(`${name} profile copy already at v${dv} — skipping restage`);
+        return;
+      }
     } catch { /* unreadable — refresh it below */ }
   }
   fs.rmSync(dst, { recursive: true, force: true });
@@ -1590,6 +1604,24 @@ function installWithRetry(cb) {
   });
 }
 
+/**
+ * Split a spawn stream into trimmed non-empty lines. Buffers partial chunks;
+ * feed the SAME feeder both stdout and stderr (order interleaves, lines don't).
+ * Shared by doSpawn's core-output parser and smokeBootDSH's headless probe.
+ */
+function createLineFeeder(onLine) {
+  let buffer = "";
+  return (chunk) => {
+    buffer += chunk.toString();
+    let idx;
+    while ((idx = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (line) onLine(line);
+    }
+  };
+}
+
 // ---- DSH lifecycle ---------------------------------------------------------
 function spawnDSH() {
   ensureDSH((found) => {
@@ -1733,16 +1765,7 @@ function doSpawn(found) {
   // isPortFree → here) from double-spawning two cores that race for the port.
   restartRequested = false;
 
-  let buffer = "";
-  const feed = (chunk) => {
-    buffer += chunk.toString();
-    let idx;
-    while ((idx = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, idx).trim();
-      buffer = buffer.slice(idx + 1);
-      if (line) handleLine(line);
-    }
-  };
+  const feed = createLineFeeder(handleLine);
   child.stdout.on("data", feed);
   child.stderr.on("data", feed);
   child.on("error", (err) => {
@@ -1842,7 +1865,7 @@ function handleLine(line) {
     log(`detected URL: ${dshUrl}`);
     clearWatchdog();
     sendStatus("Web 服务已就绪，正在打开…");
-    waitForServerThenOpen(dshUrl, 0);
+    waitForServerThenOpen(dshUrl);
   }
 }
 
@@ -1874,70 +1897,120 @@ function clearWatchdog() {
   }
 }
 
-function waitForServerThenOpen(url, attempt) {
+/**
+ * Poll a URL every 500ms (single-request timeout 2.5s) until it answers <400.
+ * Single primitive behind both server-readiness consumers:
+ *   - waitForServerThenOpen: unbounded attempts, opens the DSH page on ready;
+ *   - probeServerUp: bounded by a deadline (externally-restarted core probe).
+ * req.destroy() on timeout is deliberately ARG-LESS: destroying without an
+ * error argument releases the socket without emitting "error", so the retry
+ * is scheduled exactly once — right here.
+ * opts:
+ *   deadlineMs  — give up (onGiveUp) after this long (0/unset = no deadline)
+ *   maxAttempts — hard attempt cap (0/unset = unlimited)
+ *   guard       — checked before every attempt; truthy aborts via onGiveUp
+ *                 (the lifecycle moved on: quit requested, a restart took over)
+ *   onReady     — fired once with the winning HTTP status code
+ *   onGiveUp    — fired once when the poll aborts or expires
+ */
+function pollHttpReady(url, opts) {
+  let settled = false;
+  const until = opts.deadlineMs ? Date.now() + opts.deadlineMs : Infinity;
+  const done = (up, code) => {
+    if (settled) return;
+    settled = true;
+    if (up && opts.onReady) opts.onReady(code);
+    else if (!up && opts.onGiveUp) opts.onGiveUp();
+  };
+  let attempts = 0;
+  const retry = () => {
+    if (settled) return;
+    attempts++;
+    if (Date.now() >= until || (opts.maxAttempts && attempts > opts.maxAttempts)) { done(false); return; }
+    setTimeout(attempt, 500);
+  };
+  const attempt = () => {
+    if (settled) return;
+    if (opts.guard && opts.guard()) { done(false); return; }
+    const req = http.get(url, (res) => {
+      res.resume();
+      if (res.statusCode !== undefined && res.statusCode < 400) done(true, res.statusCode);
+      else retry();
+    });
+    req.setTimeout(2500, () => { req.destroy(); retry(); });
+    req.on("error", retry);
+  };
+  attempt();
+}
+
+function waitForServerThenOpen(url) {
   if (quitRequested) return;
-  if (attempt > MAX_WAIT_POLLS) {
-    showFatal(`等待 Web 服务超时（${url}）。请查看日志后重试。`);
-    return;
-  }
-  const req = http.get(url, (res) => {
-    res.resume();
-    if (res.statusCode !== undefined && res.statusCode < 400) {
-      log(`server ready (HTTP ${res.statusCode}) at ${url}`);
+  pollHttpReady(url, {
+    maxAttempts: MAX_WAIT_POLLS,
+    guard: () => quitRequested,
+    onReady: (code) => {
+      log(`server ready (HTTP ${code}) at ${url}`);
       openDSH(url);
-    } else {
-      setTimeout(() => waitForServerThenOpen(url, attempt + 1), 500);
+    },
+    onGiveUp: () => {
+      if (!quitRequested) showFatal(`等待 Web 服务超时（${url}）。请查看日志后重试。`);
     }
-  });
-  req.setTimeout(2500, () => {
-    req.destroy();
-    setTimeout(() => waitForServerThenOpen(url, attempt + 1), 500);
-  });
-  req.on("error", () => {
-    setTimeout(() => waitForServerThenOpen(url, attempt + 1), 500);
   });
 }
 
 /**
  * Poll a URL until it answers (<400) or the deadline passes, then cb(up).
  * Bounded cousin of waitForServerThenOpen: used to detect an externally
- * restarted DSH core on our port (see the dshProc "exit" handler).
+ * restarted DSH core on our port (see the dshProc "exit" handler). Aborts
+ * early when a restart/quit takes over: whatever binds the port next is OUR
+ * OWN new core, not an external replacement — the decision belongs to the
+ * restart chain, not us.
  */
 function probeServerUp(url, deadlineMs, cb) {
-  const until = Date.now() + deadlineMs;
-  let settled = false;
-  const done = (up) => {
-    if (settled) return;
-    settled = true;
-    cb(up);
-  };
-  const retry = () => {
-    if (settled) return;
-    if (Date.now() < until) setTimeout(attempt, 500);
-    else done(false);
-  };
-  const attempt = () => {
-    // A restart/update taking over (restartRequested) ends the probe early:
-    // whatever binds the port next is OUR OWN new core, not an external
-    // replacement — the decision belongs to the restart chain, not us.
-    if (quitRequested || restartRequested) return done(false);
-    const req = http.get(url, (res) => {
-      res.resume();
-      if (res.statusCode !== undefined && res.statusCode < 400) done(true);
-      else retry();
-    });
-    req.setTimeout(2500, () => {
-      req.destroy(); // no arg → no "error" event; the retry happens right here
-      retry();
-    });
-    req.on("error", retry);
-  };
-  attempt();
+  pollHttpReady(url, {
+    deadlineMs,
+    guard: () => quitRequested || restartRequested,
+    onReady: () => cb(true),
+    onGiveUp: () => cb(false)
+  });
 }
 
 function startDSH() {
   if (dshProc) return;
   spawnDSH();
+}
+
+/**
+ * Windows: request a process-tree kill via `taskkill /pid <pid> /T /F` — the
+ * shared boilerplate behind killDSH / killAdoptedDSH / killTree. finish()
+ * fires when the kill was REQUESTED (taskkill "close"/"error" or the safety
+ * timeout); it does NOT wait for actual death — killDSH polls for that itself
+ * afterwards (2026-09-12: callers do file surgery right after the callback).
+ * Hooks:
+ *   onNonZeroExit — taskkill answers "not found"/"access denied" via its EXIT
+ *                   CODE while still firing "close"
+ *   onStartError  — taskkill itself failed to spawn
+ *   unrefTimeout  — don't hold the process open on the safety timer (killTree)
+ */
+function taskkillTreeWin(pid, timeoutMs, finish, hooks) {
+  try {
+    const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true
+    });
+    killer.on("close", (kcode) => {
+      if (kcode !== 0 && hooks && hooks.onNonZeroExit) hooks.onNonZeroExit(kcode);
+      finish();
+    });
+    killer.on("error", (err) => {
+      if (hooks && hooks.onStartError) hooks.onStartError(err);
+      finish();
+    });
+    const t = setTimeout(finish, timeoutMs);
+    if (hooks && hooks.unrefTimeout) t.unref();
+  } catch {
+    finish();
+  }
 }
 
 function killDSH(cb) {
@@ -1979,31 +2052,16 @@ function killDSH(cb) {
     }, 100);
   };
   if (process.platform === "win32") {
-    try {
-      const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true
-      });
-      killer.on("close", (kcode) => {
-        // taskkill reports "not found"/"access denied" via its EXIT CODE while
-        // still firing "close" — treat a nonzero code as a failed kill and
-        // fall back to terminating the child directly (no /T tree walk, but
-        // better than silently leaving the old core holding the port).
-        if (kcode !== 0) {
-          log(`taskkill /pid ${proc.pid} exited code=${kcode} — direct kill fallback`);
-          try { proc.kill("SIGKILL"); } catch { /* already gone */ }
-        }
-        finish();
-      });
-      killer.on("error", (err) => {
+    taskkillTreeWin(proc.pid, 3000, finish, {
+      onNonZeroExit: (kcode) => {
+        log(`taskkill /pid ${proc.pid} exited code=${kcode} — direct kill fallback`);
+        try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+      },
+      onStartError: (err) => {
         log(`taskkill failed to start: ${err.message} — direct kill fallback`);
         try { proc.kill("SIGKILL"); } catch { /* already gone */ }
-        finish();
-      });
-      setTimeout(finish, 3000);
-    } catch {
-      finish();
-    }
+      }
+    });
   } else {
     try {
       process.kill(-proc.pid, "SIGTERM");
@@ -2048,25 +2106,15 @@ function killAdoptedDSH(cb) {
     return;
   }
   log(`killing adopted dsh pid ${pid}`);
-  if (process.platform === "win32") {
-    let done = false;
-    const finish = () => {
-      if (!done) {
-        done = true;
-        if (cb) cb();
-      }
-    };
-    try {
-      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true
-      });
-      killer.on("close", finish);
-      killer.on("error", finish);
-      setTimeout(finish, 3000);
-    } catch {
-      finish();
+  let done = false;
+  const finish = () => {
+    if (!done) {
+      done = true;
+      if (cb) cb();
     }
+  };
+  if (process.platform === "win32") {
+    taskkillTreeWin(pid, 3000, finish);
   } else {
     // Not our child and not a process-group leader we created: signal the
     // single process (its own children die with it or linger as before).
@@ -3358,10 +3406,7 @@ function killTree(child, done) {
     const pid = child && child.pid;
     if (!pid || child.exitCode !== null || child.signalCode) { finish(); return; }
     if (process.platform === "win32") {
-      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-      killer.once("exit", finish);
-      killer.once("error", finish);
-      setTimeout(finish, 5000).unref(); // never hang the flow on taskkill
+      taskkillTreeWin(pid, 5000, finish, { unrefTimeout: true });
     } else {
       child.once("close", finish);
       child.kill("SIGKILL");
@@ -3418,7 +3463,6 @@ function smokeBootDSH(cb) {
     log(`smoke boot: ${runtime.command} ${args.join(" ")} (throwaway home)`);
     const child = spawn(runtime.command, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const lines = [];
-    let buffer = "";
     let printedUrl = null;
     let settled = false;
     const finish = (ok, why) => {
@@ -3439,23 +3483,16 @@ function smokeBootDSH(cb) {
     const timer = setTimeout(() => {
       finish(false, `冒烟启动超时（${Math.round(SMOKE_BOOT_TIMEOUT_MS / 1000)}s 内未在临时端口上就绪）`);
     }, SMOKE_BOOT_TIMEOUT_MS);
-    const feed = (chunk) => {
-      buffer += chunk.toString();
-      let idx;
-      while ((idx = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line) continue;
-        lines.push(line);
-        // Core ≥0.1.2-rc.1 gates the web server on an auth token: the URL it
-        // prints carries `?token=…`, and a token-less GET / no longer answers
-        // <400 — probing the bare port therefore reads as "never ready" even
-        // though the core is up (measured in the update e2e). Poll the URL the
-        // core itself printed, exactly like handleLine feeds the real flow.
-        const u = extractDshUrl(line);
-        if (u && u.includes(`:${port}`)) printedUrl = u;
-      }
-    };
+    const feed = createLineFeeder((line) => {
+      lines.push(line);
+      // Core ≥0.1.2-rc.1 gates the web server on an auth token: the URL it
+      // prints carries `?token=…`, and a token-less GET / no longer answers
+      // <400 — probing the bare port therefore reads as "never ready" even
+      // though the core is up (measured in the update e2e). Poll the URL the
+      // core itself printed, exactly like handleLine feeds the real flow.
+      const u = extractDshUrl(line);
+      if (u && u.includes(`:${port}`)) printedUrl = u;
+    });
     child.stdout.on("data", feed);
     child.stderr.on("data", feed);
     child.on("error", (err) => finish(false, `冒烟启动进程错误：${err.message}`));

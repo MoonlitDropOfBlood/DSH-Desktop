@@ -396,7 +396,7 @@ function startServer(ctx) {
     let size = 0;
     req.on("data", (c) => { size += c.length; if (size > 4096) { req.destroy(); return; } body += c; });
     req.on("end", () => {
-      let args = null;
+      let args;
       try { args = JSON.parse(body || "{}"); } catch { args = {}; }
       if (url.pathname === "/begin" && req.method === "POST") { begin(args, (s) => json(200, s)); return; }
       if (url.pathname === "/reveal" && req.method === "POST") {

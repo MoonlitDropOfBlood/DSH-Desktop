@@ -25,6 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
       # 全部测试零 npm 依赖，无需 npm ci。语法清扫对应 AGENTS「验证一个改动」
       # 的第一步（node --check 所有改动过的 JS），在这里自动化。
       - name: Syntax check all tracked JS
@@ -35,5 +36,13 @@ jobs:
             node --check "$f" || status=1
           done < <(git ls-files '*.js')
           exit $status
+      # ESLint 需要 devDeps；ELECTRON_SKIP_BINARY_DOWNLOAD 跳过 electron 二进制
+      # 下载（lint 不需要它，省 ~120MB/次）。
+      - name: Install dev deps (no electron binary)
+        run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Lint
+        run: npm run lint
       - name: npm test
         run: npm test

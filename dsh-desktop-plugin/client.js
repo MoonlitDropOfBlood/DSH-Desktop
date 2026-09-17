@@ -230,7 +230,7 @@ window.__ModuleLoader__.load({
 			// No open conversation, or a blank one with no content yet → no button.
 			if (!showButton) return null;
 			const handleClick = () => {
-				let current = null;
+				let current;
 				try {
 					current = sessions && sessions.list ? sessions.list.getSnapshot().current : null;
 				} catch (e) {
@@ -628,6 +628,17 @@ window.__ModuleLoader__.load({
 				"（在浏览器中运行，未检测到桌面外壳）");
 		}
 
+		/** label + toggle switch row — the settings sections' repeated shape.
+		 *  onToggle is the caller's flip handler (owns state + toast); the
+		 *  checkbox merely reports the click. */
+		function ToggleRow(props) {
+			return React.createElement("div", { className: "dsh-desktop-row" },
+				React.createElement("span", { className: "dsh-desktop-label" }, props.label),
+				React.createElement("label", { className: "dsh-desktop-toggle" },
+					React.createElement("input", { type: "checkbox", checked: props.checked, onChange: props.onToggle }),
+					React.createElement("span", null, props.checked ? "已开启" : "已关闭")));
+		}
+
 		/** 核心: core version + update channel + update check + auto-update toggle
 		 *  + a 重启核心 button, plus the shell-shortcut hint (Ctrl/⌘ R refresh,
 		 *  Ctrl/⌘ Alt/⌥ R restart core) — on Windows the app menu is invisible,
@@ -718,11 +729,7 @@ window.__ModuleLoader__.load({
 						React.createElement("option", { key: o.value, value: o.value }, o.label))),
 					React.createElement("span", { className: "dsh-desktop-hint" },
 						`按 npm 的 ${coreChannel} 标签检查/安装更新`)),
-				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "自动更新"),
-					React.createElement("label", { className: "dsh-desktop-toggle" },
-						React.createElement("input", { type: "checkbox", checked: autoUpdate, onChange: toggleAuto }),
-						React.createElement("span", null, autoUpdate ? "已开启" : "已关闭"))),
+				ToggleRow({ label: "自动更新", checked: autoUpdate, onToggle: toggleAuto }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-actions" },
 					React.createElement(Button, {
 						variant: "outline", size: "sm", disabled: checking, onClick: doCheck
@@ -858,44 +865,20 @@ window.__ModuleLoader__.load({
 						(Number(dlProgress.downloadedMB) || 0).toFixed(1) + " / " +
 						(Number(dlProgress.totalMB) || 0).toFixed(0) + " MB）")
 					: null,
-				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "常驻通知栏"),
-					React.createElement("label", { className: "dsh-desktop-toggle" },
-						React.createElement("input", { type: "checkbox", checked: closeToTray, onChange: toggleTray }),
-						React.createElement("span", null, closeToTray ? "已开启" : "已关闭"))),
+				ToggleRow({ label: "常驻通知栏", checked: closeToTray, onToggle: toggleTray }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"开启后：点关闭按钮不退出，最小化到通知栏；通知栏图标右键可「打开鲸港」或「退出」。"),
-				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "阻止休眠"),
-					React.createElement("label", { className: "dsh-desktop-toggle" },
-						React.createElement("input", { type: "checkbox", checked: preventSleep, onChange: toggleSleep }),
-						React.createElement("span", null, preventSleep ? "已开启" : "已关闭"))),
-				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "任务通知"),
-					React.createElement("label", { className: "dsh-desktop-toggle" },
-						React.createElement("input", { type: "checkbox", checked: taskNotify, onChange: toggleNotify }),
-						React.createElement("span", null, taskNotify ? "已开启" : "已关闭"))),
-				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "继承终端 Profile"),
-					React.createElement("label", { className: "dsh-desktop-toggle" },
-						React.createElement("input", { type: "checkbox", checked: inheritTerminalProfile, onChange: toggleTerminalProfile }),
-						React.createElement("span", null, inheritTerminalProfile ? "已开启" : "已关闭"))),
+				ToggleRow({ label: "阻止休眠", checked: preventSleep, onToggle: toggleSleep }),
+				ToggleRow({ label: "任务通知", checked: taskNotify, onToggle: toggleNotify }),
+				ToggleRow({ label: "继承终端 Profile", checked: inheritTerminalProfile, onToggle: toggleTerminalProfile }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"继承终端 Profile：自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，建议保持开启（改动需重启 DSH 生效）。"),
-				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "插件市场"),
-					React.createElement("label", { className: "dsh-desktop-toggle" },
-						React.createElement("input", { type: "checkbox", checked: bundleMarket, onChange: toggleMarket }),
-						React.createElement("span", null, bundleMarket ? "已开启" : "已关闭"))),
+				ToggleRow({ label: "插件市场", checked: bundleMarket, onToggle: toggleMarket }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"内置插件市场（dshmarket）：随壳自带、免下载安装，可浏览/搜索/一键安装社区插件。若你已在 DSH profile 中自行安装过插件市场，以你的安装为准（不会重复挂载）；改动需重启 DSH 生效。"),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"任务通知：主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）。"),
-				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "允许插件浮窗"),
-					React.createElement("label", { className: "dsh-desktop-toggle" },
-						React.createElement("input", { type: "checkbox", checked: allowFloatWindows, onChange: toggleFloat }),
-						React.createElement("span", null, allowFloatWindows ? "已开启" : "已关闭"))),
+				ToggleRow({ label: "允许插件浮窗", checked: allowFloatWindows, onToggle: toggleFloat }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
 					"允许插件创建桌面悬浮窗口（如随任务状态变化的桌面宠物）。关闭后现有浮窗立即消失，插件也无法再创建。")
 			);

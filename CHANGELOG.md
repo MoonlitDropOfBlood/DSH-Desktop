@@ -23,6 +23,12 @@
 - **品牌文案两处落点修正**（仅显示层，内部标识不变）：托盘状态通知标题、设置页「打开鲸港」提示。
 - **仓库卫生**：`.gitignore` 补 `.inst-test*/`；`market-friends-pr.md` 草稿收编至 `designs/`；新增 `npm run clean`（清理根目录构建日志/tgz 与 dist 旧版本安装包，本次首清回收 ~404MB）。
 
+- **ESLint 10 落地（warn-first）+ .editorconfig + CI lint 步骤**：flat config 按 Node/浏览器文件组分别声明全局（两个 loader 包裹的 client bundle 是浏览器代码）；`no-control-regex` 关闭（url-extract 剥 ANSI 是合法控制字符正则）、空 catch 放行（代码库带注释忽略的惯用法）、未用 catch 绑定降 warn；顺带修掉 3 处死存储与 2 处脚本小问题。CI 装 devDeps 时跳过 electron 二进制下载（省 ~120MB/次）。
+- **main.js 重复逻辑归并（行为等价，真机 e2e 回归 PASS）**：新增 `taskkillTreeWin`（收敛 killDSH / killAdoptedDSH / killTree 三份 Windows taskkill 样板，含非零退出码兜底与超时 unref 语义）、`pollHttpReady`（waitForServerThenOpen 与 probeServerUp 两份 HTTP 探活统一，`req.destroy()` 无参不触发 error 的隐式契约写入文档）、`createLineFeeder`（doSpawn 与 smokeBootDSH 两份按行切分）。附带一处语义收紧：waitForServerThenOpen 轮询期间发生 quit 时中止等待（旧行为会继续轮询并可能向正在退出的应用弹超时面板/拉起页面）。
+- **dshmarket 暂存跳过同版本重拷**：每次 spawn 的全量 rm+recopy（同步 IO 落在重启链上）改为版本一致即跳过；pnpm prune 删除后仍自愈重拷。
+- **whpromo 轮询自适应 + 浅比较**：/state 活动期（resolving/downloading/verifying）1s、稳态 10s，快照未变不重渲染——此前每秒无条件 fetch + emit × 打开的标签页数；通知游标初始化不受浅比较影响。
+- **设置页 ToggleRow 展示 helper**：六处「label + 开关」行收敛为单行调用（刻意不引入 schema 层——维持既定决策）。
+
 ## [1.9.3] - 2026-09-17
 
 ### 修复

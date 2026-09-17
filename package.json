@@ -12,6 +12,7 @@
   "scripts": {
     "start": "electron .",
     "clean": "node scripts/clean.js",
+    "lint": "eslint .",
     "test": "node scripts/test-url-extract.js && node scripts/test-plugin-recovery.js && node scripts/test-core-version.js && node scripts/test-shell-asset.js && node scripts/test-settings-json.js && node scripts/check-docs-page.js",
     "test:e2e:recovery": "node scripts/e2e-plugin-recovery.js",
     "test:e2e:float": "node scripts/e2e-float-window.js",
@@ -123,8 +124,10 @@
     }
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@resvg/resvg-js": "^2.4.2",
     "electron": "^43.4.1",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "eslint": "^10.10.0"
   }
 }

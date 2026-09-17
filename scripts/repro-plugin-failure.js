@@ -40,7 +40,6 @@ if (!fs.existsSync(BIN)) {
 }
 const PORT = 3213;
 const BOOT_OK_TIMEOUT = 90000;
-const BOOT_FAIL_TIMEOUT = 90000;
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -65,7 +64,8 @@ function killTree(pid) {
 
 // Boot the core; resolve with { up, code, out } once the URL line appears
 // (up=true) or the process exits (up=false). Captures BOTH streams.
-function boot(home, label) {
+// `label` is scenario bookkeeping for callers that log it — unused here.
+function boot(home, _label) {
   return new Promise((resolve) => {
     const env = { ...process.env, DSH_HOME: home };
     const child = spawn(NODE, ["--expose-internals", BIN, "--profile", "web", "--port", String(PORT), "--no-open"], {

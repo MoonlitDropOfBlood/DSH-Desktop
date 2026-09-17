@@ -228,26 +228,43 @@ window.__ModuleLoader__.load({
 
       let since = 0;
       let notifyInited = false;
+      let stateTimer = 0;
       const timers = [];
-      timers.push(setInterval(() => {
-        api("/state").then((s) => {
-          if (!s || !s.phase) return;
-          if (!notifyInited && typeof s.notifySeq === "number") {
-            // Skip notifications accumulated while this page was closed: pin
-            // the cursor at "now" so the next /notify only surfaces genuinely
-            // new events (a reopened tab used to replay up to 50 stale ones).
-            since = Math.max(since, s.notifySeq);
-            notifyInited = true;
-          }
-          S.st = s;
+      // Adaptive /state polling: 1s while a download activity phase runs, 10s
+      // once idle/done/error — steady state used to fire one fetch + one full
+      // re-render EVERY second, times however many tabs are open. State ticks
+      // also pass a shallow compare (applyState) so identical snapshots don't
+      // re-render at all.
+      const applyState = (s) => {
+        if (!notifyInited && typeof s.notifySeq === "number") {
+          // Skip notifications accumulated while this page was closed: pin
+          // the cursor at "now" so the next /notify only surfaces genuinely
+          // new events (a reopened tab used to replay up to 50 stale ones).
+          since = Math.max(since, s.notifySeq);
+          notifyInited = true;
+        }
+        const cur = S.st;
+        const same = cur && cur.phase === s.phase && cur.got === s.got && cur.total === s.total
+          && cur.version === s.version && cur.error === s.error && cur.verified === s.verified
+          && cur.name === s.name && cur.file === s.file;
+        if (same) return;
+        S.st = s;
+        emit();
+        if (s.phase === "done" && lsGet("whprom.donePrompted") !== "1" && !S.open) {
+          lsSet("whprom.donePrompted", "1");
+          S.open = true;
           emit();
-          if (s.phase === "done" && lsGet("whprom.donePrompted") !== "1" && !S.open) {
-            lsSet("whprom.donePrompted", "1");
-            S.open = true;
-            emit();
-          }
+        }
+      };
+      const pollState = () => {
+        api("/state").then((s) => {
+          if (s && s.phase) applyState(s);
         }).catch(() => {});
-      }, 1000));
+        const phase = S.st && S.st.phase;
+        const busy = phase === "resolving" || phase === "downloading" || phase === "verifying";
+        stateTimer = setTimeout(pollState, busy ? 1000 : 10000);
+      };
+      pollState();
       timers.push(setInterval(() => {
         api("/notify?since=" + since).then((r) => {
           const items = (r && r.items) || [];
@@ -269,6 +286,7 @@ window.__ModuleLoader__.load({
       if (typeof ctx.effect === "function") {
         ctx.effect(() => () => {
           for (const t of timers) { clearTimeout(t); clearInterval(t); }
+          clearTimeout(stateTimer); // the self-rescheduling /state poll
           try { styleEl.remove(); } catch (e) { /* ignore */ }
         });
       }
@@ -292,7 +310,6 @@ window.__ModuleLoader__.load({
         const appOpened = useS().appOpened;
         if (!open) return null;
         const phase = s.phase || "idle";
-        const pct = s.total > 0 ? Math.max(0, Math.min(100, Math.round(s.got / s.total * 100))) : null;
 
         let statusCard;
         if (phase === "done") {

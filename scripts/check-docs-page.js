@@ -11,6 +11,9 @@ scripts.forEach((m, i) => {
 });
 console.log(`inline scripts OK (${scripts.length})`);
 
+// The emoji ranges intentionally mix astral (\u{…}) and BMP codepoints — the
+// "combined character" eslint flags here is exactly what this scan looks for.
+// eslint-disable-next-line no-misleading-character-class
 const emojiRe = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{2B50}\u{2B55}\u{3030}\u{303D}\u{3297}\u{3299}]/gu;
 const found = html.match(emojiRe) || [];
 if (found.length) { console.error("EMOJI FOUND:", [...new Set(found)].join(" ")); process.exit(1); }

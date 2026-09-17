@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# main.js / scripts / configs are 2-space; the two loader-wrapped client
+# bundles are indented with tabs — follow the file, don't churn history.
+[*.{js,json,yml,yaml,html,css}]
+indent_style = space
+indent_size = 2
+
+[dsh-desktop-plugin/client.js]
+indent_style = tab
+
+[plugins/whaleharbor-promo/client.js]
+indent_style = tab
+
+[*.md]
+trim_trailing_whitespace = false
