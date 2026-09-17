@@ -175,7 +175,7 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 
 ### 11. 壳自身自更新（GitHub Releases）
 
-`queryShellLatest` 逐源查（直连 → `SHELL_MIRRORS` 镜像前缀）；`shellAssetForPlatform`（规则在 `shell-asset.js`，**勿用裸 `.find(/\.dmg$/)` 误拿 arm64**）；**下载完成必须校验 GitHub 资产 `digest`（SHA-256）才允许启动安装**——镜像（gh-proxy.com）是社区代理，不可信任；`asset.name` 过 `path.basename()` 再拼 temp 路径；`openPath` 失败（杀软拦截）**不退出应用**、错误回设置页；`compareVersions` 只用于壳版本。发布 = `v*` 标签 → build-installers.yml（CI 同时上传 `.blockmap`/`latest.yml` 备用）。**镜像表/超时与 whaleharbor-promo 是两份拷贝，改动两边同步**。细节 → [docs/agents/install-and-update.md](docs/agents/install-and-update.md) §11。
+`queryShellLatest` 逐源查（直连 → `SHELL_MIRRORS` 镜像前缀）；`shellAssetForPlatform`（规则在 `shell-asset.js`，**勿用裸 `.find(/\.dmg$/)` 误拿 arm64**）；**下载完成必须校验 GitHub 资产 `digest`（SHA-256）才允许启动安装**——镜像（gh-proxy.com）是社区代理，不可信任；`asset.name` 过 `path.basename()` 再拼 temp 路径；`openPath` 失败（杀软拦截）**不退出应用**、错误回设置页；`compareVersions` 只用于壳版本。**HTTP 头 UA 必须用 `SHELL_UA`（ASCII），严禁塞 `APP_NAME`**——APP_NAME 含中文，HTTP 头不允许非 latin1，塞进去 `https.get` 同步抛 `ERR_INVALID_CHAR`：v1.7.0 品牌更名起潜伏（手动检查被 `.catch` 吞成"检查失败"）、1.9.4 的 60s 后台检查定时器引爆成开机崩溃面板；定时器驱动的路径一律加防御性 catch。发布 = `v*` 标签 → build-installers.yml（CI 同时上传 `.blockmap`/`latest.yml` 备用）。**镜像表/超时与 whaleharbor-promo 是两份拷贝，改动两边同步**。细节 → [docs/agents/install-and-update.md](docs/agents/install-and-update.md) §11。
 
 ## 开发 / 运行 / 验证
 

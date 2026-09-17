@@ -73,7 +73,8 @@
 ## §11. 壳自身自更新（GitHub Releases，区别于 DSH 核心的 npm 更新）
 
 - 壳的版本来源：`app.getVersion()`（package.json），`pushUpdateState()` 里带 `shellVersion`，桌面版设置页显示。
-- 检查更新：`dsh:checkShellUpdate` → `queryShellLatest()` 查 `https://api.github.com/repos/${SHELL_REPO}/releases/latest`（默认 `MoonlitDropOfBlood/DSH-Desktop`，可 `DSH_DESKTOP_SHELL_REPO` 覆盖），逐源尝试 API（直连 → 各镜像前缀）。
+- 检查更新：`dsh:checkShellUpdate` → `queryShellLatest()` 查 `https://api.github.com/repos/${SHELL_REPO}/releases/latest`（默认 `MoonlitDropOfBlood/DSH-Desktop`，可 `DSH_DESKTOP_SHELL_REPO` 覆盖），逐源尝试 API（直连 → 各镜像前缀）。另有 `checkShellUpdateSilent()` 定时后台检查（开机 1min 后 + 每 12h），只喂侧栏徽章不弹面板。
+- **User-Agent 必须 ASCII（2026-09-18 崩溃事故）**：`queryShellLatest`/`downloadFile` 的 UA 用 `SHELL_UA`（`"WhaleHarbor/" + app.getVersion()`）。曾用显示品牌 `APP_NAME`（"鲸港 WhaleHarbor" 含中文）——HTTP 头不允许非 latin1 字符，`https.get` **同步抛** `ERR_INVALID_CHAR`：v1.7.0 起手动「检查更新」被 `.catch` 吞成"检查失败"（壳自更新检查一直坏的根因），1.9.4 的 60s 后台检查定时器引爆成每次开机一分钟的崩溃面板。**显示文案用 APP_NAME，线上 HTTP 头一律 SHELL_UA**；定时器驱动的后台路径（checkShellUpdateSilent）整体加防御性 catch——绝不触发 uncaughtException 崩溃面板。recovery e2e 常驻 75s 存活断言覆盖该定时器窗口。
 - 按平台选资产 `shellAssetForPlatform`（规则在 `shell-asset.js`，锁在 `scripts/test-shell-asset.js`）：win32→`.exe`；darwin→arm64 用 `arm64.dmg`、x64 优先非 arm64 的 `.dmg`（**别用 `.find(/\.dmg$/)` 会误拿 arm64**）；linux→`.AppImage`（回退 `.deb`/`.rpm`）。
 - 下载：`dsh:downloadShellUpdate` → `downloadFile()`（`https.get` + 跟随 302 重定向，GitHub 资产会跳转 `objects.githubusercontent.com`；socket 30s 无数据超时）→ 进度经 `dsh:shellDownloadProgress` 推给桌面版设置 UI。**完整性校验（2026-09-16 起）**：下载完成后对 GitHub 资产的 `digest` 字段（`sha256:<hex>`，解析在 `shell-asset.js` 的 `parseAssetDigest`）做 SHA-256 校验，不匹配 = 该源失败、损坏文件删除、自动切下一源；Release 未提供 digest 时跳过校验并记日志。`asset.name` 经 `path.basename()` 清洗后才拼 temp 路径（镜像可控名字段的 `../` 逃逸封死）。全部源耗尽且发生过校验失败时，错误文案区分"校验失败"与"网络不可达"。
 - 启动安装：`launchShellInstaller()`：win 打开 NSIS 安装包并 2s 后退出应用（安装器要替换运行中的 exe）；mac 打开 dmg；linux chmod +x 后打开 AppImage。**`shell.openPath` 失败（杀软拦截等）不再退出应用**——错误经 `dsh:shellDownloadProgress` 回给设置页，壳保持存活。
