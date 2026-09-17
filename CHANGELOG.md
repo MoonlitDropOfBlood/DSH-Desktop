@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-09-17
+
 ### 修复
 
 - **`prepareDesktopPlugin` 改用 asar 安全的 `copyDirRecursive`**：原逐文件平铺拷贝在插件目录出现任何子目录时（打包版源在 asar 内）会抛 EISDIR → 整个 patch 静默不生成、窗口控制条降级为兜底条。
