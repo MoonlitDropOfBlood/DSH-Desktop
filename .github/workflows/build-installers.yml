@@ -166,7 +166,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-windows, build-linux, build-mac]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -193,14 +193,68 @@ jobs:
           ' "$VERSION"
       - name: List artifacts
         run: ls -la artifacts/
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          generate_release_notes: false # 用 CHANGELOG 作为发布说明，不依赖 PR 标题
-          body_path: RELEASE_BODY.md
-          files: artifacts/*
+      # 发布 = 幂等创建 + 逐文件重试上传 + 完整性校验（gh CLI，替代 softprops/action-gh-release@v2）。
+      #
+      # 背景（v1.9.4/v1.9.5 连续踩坑）：softprops@v2 对 GitHub 资产上传接口（uploads.github.com）
+      # 的抖动/超时没有兜底——新 Release 创建后有复制延迟（"not yet discoverable by tag"），
+      # 大文件（dmg/exe 120-180MB）上传易超时（"Headers Timeout Error"，issue #549 的 5 分钟
+      # 超时）或单资产失败（"Error saving asset"）；且单个资产失败不重试，一次失败整个 Release
+      # 发布标红，留下半成品 Release 只能手动删。gh 逐文件独立请求 + 每文件最多 5 次重试 +
+      # --clobber 幂等覆盖，最后校验全部产物在 Release 上才判成功，重跑/补传都安全。
+      - name: Create GitHub Release (idempotent)
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+            echo "Release $TAG already exists, updating it"
+            # 重跑时保证 body 仍是本次 CHANGELOG 章节
+            gh release edit "$TAG" --notes-file RELEASE_BODY.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file RELEASE_BODY.md
+            echo "Created release $TAG"
+          fi
+      - name: Upload assets with per-file retry
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          fail=0
+          for f in artifacts/*; do
+            name="$(basename "$f")"
+            ok=0
+            for i in 1 2 3 4 5; do
+              if gh release upload "$TAG" "$f" --clobber; then
+                echo "Uploaded $name"
+                ok=1
+                break
+              fi
+              echo "Upload of $name failed (attempt $i/5), retrying in 10s"
+              sleep 10
+            done
+            [ "$ok" -eq 1 ] || { echo "Giving up on $name"; fail=1; }
+          done
+          [ "$fail" -eq 0 ]
+      - name: Verify all assets are on the release
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          for attempt in 1 2 3 4 5; do
+            missing=0
+            for f in artifacts/*; do
+              name="$(basename "$f")"
+              if ! gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qxF "$name"; then
+                echo "Waiting for $name to appear (attempt $attempt/5)"
+                missing=1
+              fi
+            done
+            [ "$missing" -eq 0 ] && { echo "All $(ls artifacts | wc -l) assets verified on $TAG"; exit 0; }
+            sleep 15
+          done
+          echo "Release $TAG incomplete after verification retries"
+          gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null || true
+          exit 1
