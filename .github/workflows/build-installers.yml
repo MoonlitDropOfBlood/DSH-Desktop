@@ -245,11 +245,25 @@ jobs:
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
+          # GitHub normalizes uploaded asset names: SPACES → DOTS (the NSIS exe
+          # "DeepSeek Harness Desktop Setup 1.10.0.exe" is stored as
+          # "DeepSeek.Harness.Desktop.Setup.1.10.0.exe"). v1.10.0's verify step
+          # compared RAW names, never matched, and failed after 5 attempts even
+          # though all 8 assets were on the release. Compare NORMALIZED
+          # (lowercased + space→dot) names on both sides.
+          normalize() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '.'; }
+          stored() { gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null; }
           for attempt in 1 2 3 4 5; do
             missing=0
+            assets="$(stored)"
             for f in artifacts/*; do
               name="$(basename "$f")"
-              if ! gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qxF "$name"; then
+              want="$(normalize "$name")"
+              found=0
+              while IFS= read -r s; do
+                [ "$(normalize "$s")" = "$want" ] && { found=1; break; }
+              done <<< "$assets"
+              if [ "$found" -eq 0 ]; then
                 echo "Waiting for $name to appear (attempt $attempt/5)"
                 missing=1
               fi
@@ -258,5 +272,5 @@ jobs:
             sleep 15
           done
           echo "Release $TAG incomplete after verification retries"
-          gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null || true
+          stored || true
           exit 1
