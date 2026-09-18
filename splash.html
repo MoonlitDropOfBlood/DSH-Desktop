@@ -356,15 +356,15 @@ h1 {
     <div class="drag"></div>
     <div class="title">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12c0-5.5 4.5-10 10-10s10 4.5 10 10-4.5 10-10 10S2 17.5 2 12z"/><path d="M7 12c0-2.8 2.2-5 5-5s5 2.2 5 5-2.2 5-5 5-5-2.2-5-5z"/><circle cx="10" cy="10" r="1" fill="currentColor"/></svg>
-      鲸港 WhaleHarbor
+      <span data-i18n="splash.title">鲸港 WhaleHarbor</span>
     </div>
-    <button class="btn" data-act="minimize" title="最小化">
+    <button class="btn" data-act="minimize" data-i18n-title="splash.titlebar.minimize" title="最小化">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
     </button>
-    <button class="btn" data-act="toggleMaximize" title="最大化/还原">
+    <button class="btn" data-act="toggleMaximize" data-i18n-title="splash.titlebar.maximize" title="最大化/还原">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
     </button>
-    <button class="btn close" data-act="close" title="关闭">
+    <button class="btn close" data-act="close" data-i18n-title="splash.titlebar.close" title="关闭">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
     </button>
   </div>
@@ -392,9 +392,9 @@ h1 {
       </div>
 
       <div class="spinner hidden" id="spinner"></div>
-      <h1>鲸港 WhaleHarbor</h1>
-      <div class="subtitle">DeepSeek Harness 桌面端</div>
-      <div id="status">正在启动…</div>
+      <h1 data-i18n="splash.title">鲸港 WhaleHarbor</h1>
+      <div class="subtitle" data-i18n="splash.subtitle">DeepSeek Harness 桌面端</div>
+      <div id="status" data-i18n="splash.starting">正在启动…</div>
 
       <div class="progress-wrap" id="progressWrap" hidden>
         <div class="progress"><div class="bar" id="progressBar"></div></div>
@@ -409,20 +409,122 @@ h1 {
         <div id="errorTitle"></div>
         <div id="errorDetail"></div>
         <div class="port-row" id="portRow" hidden>
-          <label for="portInput">端口</label>
+          <label for="portInput" data-i18n="splash.port.label">端口</label>
           <input id="portInput" type="number" min="1" max="65535" value="3080" />
-          <span class="hint">换一个未被占用的端口后重试</span>
+          <span class="hint" data-i18n="splash.port.hint">换一个未被占用的端口后重试</span>
         </div>
         <div class="actions" id="errorActions"></div>
-        <button class="copy" id="btnCopy" hidden>复制错误信息</button>
+        <button class="copy" id="btnCopy" hidden data-i18n="splash.copy.error">复制错误信息</button>
       </div>
     </div>
   </div>
 
   <script>
     (function () {
-      var bridge = window.dshDesktop;
+      // ---- i18n: a self-contained copy of locales.js's dictionaries, kept
+      // byte-for-byte in sync with the source-of-truth locales.js file (the
+      // splash cannot `require()` because it's loaded via loadFile + a CSP
+      // that does not include a bundler). `scripts/check-i18n-sync.js`
+      // verifies the two copies match at CI time — never edit one without
+      // the other. See AGENTS §15.
+      var I18N = {
+        "zh-CN": {
+          "splash.title": "鲸港 WhaleHarbor",
+          "splash.subtitle": "DeepSeek Harness 桌面端",
+          "splash.starting": "正在启动…",
+          "splash.titlebar.minimize": "最小化",
+          "splash.titlebar.maximize": "最大化/还原",
+          "splash.titlebar.close": "关闭",
+          "splash.copy.error": "复制错误信息",
+          "splash.copy.detail": "复制详情",
+          "splash.copy.done": "已复制 ✓",
+          "splash.copy.failed": "复制失败",
+          "splash.copy.fail.fallback": "请手动选中后复制",
+          "splash.port.label": "端口",
+          "splash.port.hint": "换一个未被占用的端口后重试",
+          "splash.progress.downloading": "已下载 {downloaded} MB / 约 {total} MB（{percent}%）",
+          "splash.progress.done": "下载完成，正在安装依赖并启动…",
+          "splash.error.default": "启动失败",
+          "splash.action.retry": "重试",
+          "splash.action.quit": "退出"
+        },
+        "en-US": {
+          "splash.title": "WhaleHarbor",
+          "splash.subtitle": "DeepSeek Harness for desktop",
+          "splash.starting": "Starting…",
+          "splash.titlebar.minimize": "Minimize",
+          "splash.titlebar.maximize": "Maximize / restore",
+          "splash.titlebar.close": "Close",
+          "splash.copy.error": "Copy error",
+          "splash.copy.detail": "Copy details",
+          "splash.copy.done": "Copied ✓",
+          "splash.copy.failed": "Copy failed",
+          "splash.copy.fail.fallback": "Please select the text and copy manually",
+          "splash.port.label": "Port",
+          "splash.port.hint": "Pick an unused port and retry",
+          "splash.progress.downloading": "Downloaded {downloaded} MB / ~{total} MB ({percent}%)",
+          "splash.progress.done": "Download complete, installing and starting…",
+          "splash.error.default": "Startup failed",
+          "splash.action.retry": "Retry",
+          "splash.action.quit": "Quit"
+        }
+      };
+      var DEFAULT_LOCALE = "zh-CN";
+      function primarySubtagToSupported(tag) {
+        var t = String(tag || "").toLowerCase();
+        if (t === "zh" || t.indexOf("zh-") === 0) return "zh-CN";
+        if (t === "en" || t.indexOf("en-") === 0) return "en-US";
+        return null;
+      }
+      function detectLocale(acceptLanguage) {
+        if (!acceptLanguage || typeof acceptLanguage !== "string") return DEFAULT_LOCALE;
+        var entries = [];
+        var raw = acceptLanguage.split(",");
+        for (var i = 0; i < raw.length; i++) {
+          var parts = raw[i].split(";");
+          var tag = (parts[0] || "").trim();
+          if (!tag) continue;
+          var q = 1;
+          for (var j = 1; j < parts.length; j++) {
+            var m = /^\s*q\s*=\s*([0-9.]+)\s*$/i.exec(parts[j]);
+            if (m) { var parsed = Number(m[1]); if (isFinite(parsed)) q = parsed; }
+          }
+          if (q <= 0) continue;
+          entries.push({ tag: tag.toLowerCase(), q: q });
+        }
+        if (!entries.length) return DEFAULT_LOCALE;
+        entries.sort(function (a, b) { return b.q - a.q; });
+        for (var k = 0; k < entries.length; k++) {
+          var exact = entries[k].tag === "zh-cn" ? "zh-CN" : (entries[k].tag === "en-us" ? "en-US" : null);
+          if (exact) return exact;
+          var mapped = primarySubtagToSupported(entries[k].tag);
+          if (mapped) return mapped;
+        }
+        return DEFAULT_LOCALE;
+      }
+      function lookup(key, locale) {
+        var d = I18N[locale] || I18N[DEFAULT_LOCALE] || {};
+        var v = d[key];
+        if (v !== undefined && v !== null) return v;
+        if (locale !== DEFAULT_LOCALE) {
+          var def = I18N[DEFAULT_LOCALE] || {};
+          var dv = def[key];
+          if (dv !== undefined && dv !== null) return dv;
+        }
+        return key;
+      }
+      function interpolate(tpl, vars) {
+        if (!vars) return tpl;
+        return String(tpl).replace(/\{(\w+)\}/g, function (m, name) {
+          return Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m;
+        });
+      }
+      function t(key, locale, vars) {
+        return interpolate(lookup(key, locale), vars);
+      }
 
+      var bridge = window.dshDesktop;
+      var SPLASH_LOCALE = DEFAULT_LOCALE;
       // ---- theme: applied before bridge wiring so first paint is correct ----
       function applyTheme(pref, systemDark) {
         var dark;
@@ -432,14 +534,38 @@ h1 {
         document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
       }
 
+      // ---- locale: applied before first paint too, via <html lang> + data-i18n
+      function applyLocale(locale) {
+        SPLASH_LOCALE = locale;
+        document.documentElement.setAttribute("lang", locale);
+        var nodes = document.querySelectorAll("[data-i18n]");
+        for (var i = 0; i < nodes.length; i++) {
+          var node = nodes[i];
+          var key = node.getAttribute("data-i18n");
+          var attr = node.getAttribute("data-i18n-attr"); // optional: bind to attribute instead of text
+          var text = t(key, locale);
+          if (attr) node.setAttribute(attr, text);
+          else node.textContent = text;
+        }
+        // Also handle any placeholders whose arg names are stable (e.g. data-i18n-title="...").
+        var titleNodes = document.querySelectorAll("[data-i18n-title]");
+        for (var t2 = 0; t2 < titleNodes.length; t2++) {
+          titleNodes[t2].setAttribute("title", t(titleNodes[t2].getAttribute("data-i18n-title"), locale));
+        }
+      }
+
       if (bridge) {
-        // Synchronous theme query available — set immediately.
-        var t = bridge.getThemeSync ? bridge.getThemeSync() : null;
-        if (t) applyTheme(t.preference, t.systemDark);
+        // Synchronous theme + locale query available — set immediately.
+        var sync = bridge.getThemeSync ? bridge.getThemeSync() : null;
+        if (sync) {
+          applyTheme(sync.preference, sync.systemDark);
+          applyLocale(sync.locale || detectLocale(navigator.language) || DEFAULT_LOCALE);
+        }
       } else {
         // No bridge (opened outside the shell) — follow the OS.
         var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
         applyTheme("system", mq ? mq.matches : true);
+        applyLocale(detectLocale(navigator.language || ""));
       }
 
       // ---- titlebar window controls ----
@@ -455,6 +581,30 @@ h1 {
       });
 
       if (!bridge) return;
+
+      // ---- battery report (AGENTS §6d) --------------------------------
+      // The main process has no battery-level API; this page is the first
+      // renderer to run, so report as early as possible — if the report
+      // wins the race against the first DSH spawn, the core's
+      // DSH_DESKTOP_POWER_PLAN env already reflects the battery state.
+      // Fires once here; the long-lived DSH page keeps the stream alive.
+      if (typeof bridge.reportBatteryState === "function"
+          && navigator.getBattery) {
+        try {
+          navigator.getBattery().then(function (bat) {
+            if (!bat) return;
+            var report = function () {
+              bridge.reportBatteryState({
+                onBattery: bat.charging === false,
+                levelPercent: typeof bat.level === "number" ? Math.round(bat.level * 100) : null
+              });
+            };
+            report();
+            bat.addEventListener("chargingchange", report);
+            bat.addEventListener("levelchange", report);
+          }).catch(function () { /* no battery API on this platform → normal mode */ });
+        } catch (e) { /* ditto */ }
+      }
 
       var statusEl = document.getElementById("status");
       var logEl = document.getElementById("log");
@@ -474,17 +624,13 @@ h1 {
         statusEl.classList.toggle("error", flag);
       }
 
-      // ---- titlebar window controls ----
-      document.querySelectorAll("#titlebar .btn").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          bridge.windowControl(btn.dataset.act);
-        });
-      });
-
-      // ---- live theme updates (when user toggles appearance in DSH settings) ----
+      // ---- live theme + locale updates (when user toggles in DSH settings) ----
       if (bridge.onThemeChange) {
-        bridge.onThemeChange(function (t) {
-          if (t) applyTheme(t.preference, t.systemDark);
+        bridge.onThemeChange(function (sync) {
+          if (sync) {
+            applyTheme(sync.preference, sync.systemDark);
+            if (sync.locale) applyLocale(sync.locale);
+          }
         });
       }
 
@@ -509,11 +655,13 @@ h1 {
         var pct = Math.max(0, Math.min(100, Number(p.percent) || 0));
         progressBar.style.width = pct + "%";
         if (p.phase === "done") {
-          progressText.textContent = "下载完成，正在安装依赖并启动…";
+          progressText.textContent = t("splash.progress.done", SPLASH_LOCALE);
         } else {
           var mb = (Number(p.downloadedMB) || 0).toFixed(1);
           var total = (Number(p.totalMB) || 0).toFixed(0);
-          progressText.textContent = "已下载 " + mb + " MB / 约 " + total + " MB（" + pct + "%）";
+          progressText.textContent = t("splash.progress.downloading", SPLASH_LOCALE, {
+            downloaded: mb, total: total, percent: pct
+          });
         }
       });
 
@@ -529,14 +677,20 @@ h1 {
         document.getElementById("errorIconWrap").innerHTML = isInfo
           ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>'
           : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
-        errorTitle.textContent = info.message || "启动失败";
+        errorTitle.textContent = info.message || t("splash.error.default", SPLASH_LOCALE);
         errorDetail.textContent = info.detail || "";
         var hasChangePort = !!info.canChangePort;
         portRow.hidden = !hasChangePort;
         if (hasChangePort) portInput.value = String(info.suggestPort || 3080);
         var actions = (Array.isArray(info.actions) && info.actions.length)
           ? info.actions
-          : [{ id: "retry", label: "重试" }, { id: "quit", label: "退出" }];
+          : [{ id: "retry" }, { id: "quit" }];
+        // Fill in translated defaults for known action ids when the main process
+        // did not supply a label (which it normally does; this is a defence).
+        var knownActions = {
+          retry: t("splash.action.retry", SPLASH_LOCALE),
+          quit: t("splash.action.quit", SPLASH_LOCALE)
+        };
         errorActions.innerHTML = "";
         actions.forEach(function (a) {
           var btn = document.createElement("button");
@@ -544,7 +698,7 @@ h1 {
           btn.className = "act";
           if (a.id === "quit") btn.className += " danger";
           else if (a.id === "retry" || a.id === "installRetry" || a.id === "continue") btn.className += " primary";
-          btn.textContent = a.label || a.id;
+          btn.textContent = a.label || knownActions[a.id] || a.id;
           btn.addEventListener("click", function () {
             errorPanel.classList.remove("visible");
             bridge.startupChoice({ action: a.id, port: portInput.value });
@@ -552,7 +706,7 @@ h1 {
           errorActions.appendChild(btn);
         });
         btnCopy.hidden = false;
-        copyBaseLabel = isInfo ? "复制详情" : "复制错误信息";
+        copyBaseLabel = isInfo ? t("splash.copy.detail", SPLASH_LOCALE) : t("splash.copy.error", SPLASH_LOCALE);
         btnCopy.textContent = copyBaseLabel;
         errorPanel.classList.add("visible");
         // An error panel means the progress bar below it is stale — hide it
@@ -561,22 +715,22 @@ h1 {
         // Error state: hide the logo + spinner entirely, show a static error glyph
         logoWrap.style.display = "none";
         spinnerEl.classList.add("hidden");
-        statusEl.textContent = info.message || "启动失败";
+        statusEl.textContent = info.message || t("splash.error.default", SPLASH_LOCALE);
         setErrorClass(!isInfo);
       });
 
       // ---- copy error text ----
-      var copyBaseLabel = "复制错误信息";
+      var copyBaseLabel = t("splash.copy.error", SPLASH_LOCALE);
       btnCopy.addEventListener("click", function () {
         var text = errorTitle.textContent + "\n\n" + errorDetail.textContent +
           "\n\n--- 最近日志 ---\n" + logEl.textContent;
         try {
           if (bridge.copyText) bridge.copyText(text);
           else if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
-          btnCopy.textContent = "已复制 ✓";
+          btnCopy.textContent = t("splash.copy.done", SPLASH_LOCALE);
           setTimeout(function () { btnCopy.textContent = copyBaseLabel; }, 1500);
         } catch (err) {
-          btnCopy.textContent = "复制失败";
+          btnCopy.textContent = t("splash.copy.failed", SPLASH_LOCALE);
         }
       });
     })();

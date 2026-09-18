@@ -35,7 +35,7 @@
  * running core crashed on Windows), then restart the core with the new version.
  */
 
-const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeImage, powerSaveBlocker, Notification, clipboard, screen, nativeTheme } = require("electron");
+const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeImage, powerSaveBlocker, powerMonitor, Notification, clipboard, screen, nativeTheme } = require("electron");
 const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -504,6 +504,31 @@ function sendProgress(p) {
  * per action; when `info.actions` is absent a default set is used
  * (重试 / 换端口并重试 / 退出) based on canChangePort.
  */
+/**
+ * Translate known startup-panel action labels to the UI locale. Callers
+ * author labels in Chinese (the historical default); the splash cannot
+ * translate them because custom labels are free-form. Reverse-lookup table:
+ * an exact zh match maps to a dictionary key and is re-rendered in the
+ * current locale; anything else passes through untouched. When the locale
+ * is zh-CN the lookup is a no-op by construction (zh value === input).
+ */
+function localizeActionLabels(actions) {
+  const LABEL_TO_KEY = {
+    "重试": "splash.action.retry",
+    "退出": "splash.action.quit",
+    "换端口并重试": "splash.action.changePort",
+    "换镜像重试": "splash.action.installSwitchRegistry",
+    "用当前版本继续": "splash.action.installContinue",
+    "进入 DeepSeek Harness": "splash.action.enter"
+  };
+  const locale = currentLocale();
+  if (locale === "zh-CN" || !Array.isArray(actions)) return actions;
+  return actions.map((a) => {
+    const key = a && typeof a.label === "string" ? LABEL_TO_KEY[a.label] : null;
+    return key ? { ...a, label: require("./locales.js").t(key, locale) } : a;
+  });
+}
+
 function showStartupError(info) {
   log(`startup error: ${info.message}`);
   if (quitRequested || isQuitting) return;
@@ -515,6 +540,7 @@ function showStartupError(info) {
     actions.push({ id: "quit", label: "退出" });
     payload.actions = actions;
   }
+  payload.actions = localizeActionLabels(payload.actions);
   const isSplash = (() => {
     try { return mainWindow.webContents.getURL().startsWith("file:"); } catch { return false; }
   })();
@@ -901,6 +927,12 @@ function childEnv() {
   // so its host-half plugin can authenticate to the local bridge.
   if (notifyToken) env.DSH_DESKTOP_NOTIFY_TOKEN = notifyToken;
   if (notifyPort) env.DSH_DESKTOP_NOTIFY_PORT = String(notifyPort);
+  // Power-plan signal: downstream plugins (whpromo, future shell-aware
+  // plugins) read this on startup to decide how often to poll. The shell
+  // also pushes live updates via the bridge's reverse channel, but env is
+  // the boot-time signal so plugins don't need a one-shot handshake.
+  const plan = currentPowerPlan();
+  env.DSH_DESKTOP_POWER_PLAN = plan && plan.mode === "lowpower" ? "lowpower" : "normal";
   return env;
 }
 
@@ -1748,6 +1780,9 @@ function doSpawn(found) {
 
   const env = childEnv();
   if (runtime.runAsNode) env.ELECTRON_RUN_AS_NODE = "1";
+  // e2e observability: the power-plan signal actually handed to THIS core
+  // generation (asserted by scripts/e2e-i18n-powerplan.js).
+  log(`spawn env: DSH_DESKTOP_POWER_PLAN=${env.DSH_DESKTOP_POWER_PLAN}`);
   // --expose-internals is a NODE option (consumed by the runtime before
   // bin.js, never reaching the core's strict commander): core rc.7+ launchers
   // eagerly create the HMR service for cordis.patch.yml hot-watching, and the
@@ -2271,12 +2306,31 @@ function readDshThemePreference() {
   }
 }
 
-/** Current resolved theme: { preference, dark } sent to the splash page. */
+/** Current resolved theme: { preference, dark, locale } sent to the splash page.
+ *  locale is the same value every consumer (splash, settings page, tray menu)
+ *  uses — see AGENTS §15. The renderer never has to read it independently. */
 function currentTheme() {
   const preference = readDshThemePreference();
   // nativeTheme.shouldUseDarkColors already resolves "system" against the OS.
   nativeTheme.themeSource = preference === "system" ? "system" : preference;
-  return { preference, systemDark: nativeTheme.shouldUseDarkColors };
+  return {
+    preference,
+    systemDark: nativeTheme.shouldUseDarkColors,
+    locale: currentLocale()
+  };
+}
+
+/** Resolve the shell UI locale: DSH_DESKTOP_LOCALE override wins (debug/CI),
+ *  then Electron's app.getLocale() (system locale at launch — the right
+ *  source for "what does the user want"). Goes through detectLocale() so
+ *  primary-subtag / regional variants map correctly ("en-GB" → en-US,
+ *  "zh-Hant" → zh-CN) — a whitelist-only exact match used to knock every
+ *  non-exact system tag down to the default. Unsupported values fall
+ *  through to DEFAULT_LOCALE = zh-CN: staying on a known-good translation
+ *  beats showing the user a language they didn't ask for. */
+function currentLocale() {
+  const { detectLocale } = require("./locales.js");
+  return detectLocale(process.env.DSH_DESKTOP_LOCALE || app.getLocale() || "");
 }
 
 /** Push the current theme to the splash window (fire-and-forget). */
@@ -2305,6 +2359,12 @@ function readRawSettings() {
 
 function readSettings() {
   const json = readRawSettings();
+  // powerSaveMode ∈ {"auto", "lowpower", "off"} — invalid values fall back
+  // to "auto" (the safe default: no false-positive lowpower engagement, and
+  // no manual override needed). See AGENTS §16.
+  const powerMode = ["auto", "lowpower", "off"].indexOf(json.powerSaveMode) >= 0
+    ? json.powerSaveMode
+    : "auto";
   return {
     autoUpdate: json.autoUpdate === true,
     closeToTray: json.closeToTray === true,
@@ -2314,6 +2374,7 @@ function readSettings() {
     allowFloatWindows: json.allowFloatWindows !== false, // default ON
     bundleMarket: json.bundleMarket !== false, // default ON
     coreChannel: CORE_CHANNELS.indexOf(json.coreChannel) >= 0 ? json.coreChannel : "latest",
+    powerSaveMode: powerMode,
     port: /^\d+$/.test(String(json.port)) ? Number(json.port) : undefined
   };
 }
@@ -2407,6 +2468,127 @@ function applyPreventSleep() {
     sleepBlockerId = null;
     log("prevent-sleep OFF");
   }
+}
+
+// ---- 电池友好 (powerMonitor + powerplan.js) ----------------------------------
+// AGENTS §16. The shell subscribes to Electron's powerMonitor events, feeds
+// the latest battery state into decidePowerPlan(), and propagates the
+// resulting plan to:
+//   - the renderer (pushUpdateState().powerPlan — drives the settings hint +
+//     UI chrome),
+//   - the spawned DSH core (DSH_DESKTOP_POWER_PLAN env var — downstream
+//     plugins like whpromo read it on startup to quiet their heartbeat
+//     polling),
+//   - the tray tooltip (so the user sees why background activity slowed),
+//   - the system tray menu (subtle label so powerusers can confirm).
+//
+// decidePowerPlan() is the single source of truth — see powerplan.js and
+// scripts/test-powerplan.js for the threshold/mode matrix. The shell must
+// never make its own battery → lowpower decision; that's the whole point
+// of having the pure function + locked tests.
+let powerPlanCache = { mode: "normal", reason: "init", source: "auto" };
+
+/**
+ * Battery state cache. CRITICAL CONSTRAINT (2026-09 review): Electron's
+ * main-process powerMonitor has NO battery-level API — its battery surface
+ * is exactly `isOnBatteryPower()` + the `on-battery` / `on-ac` events
+ * (verified against node_modules/electron/electron.d.ts; an earlier draft
+ * called `powerMonitor.getBatteryLevel()` and `powerMonitor.isOnBattery`,
+ * neither of which exists → the level was silently always null and auto
+ * mode could never engage). The battery LEVEL therefore comes from the
+ * RENDERER via the Chromium Battery Status API (`navigator.getBattery()`,
+ * available in our file:// splash and the http://127.0.0.1 DSH page — both
+ * secure contexts): splash reports once at boot (so the first spawn env is
+ * already informed when the report wins the race), the long-lived DSH page
+ * keeps reporting on chargingchange/levelchange.
+ *
+ * Until the first report arrives the state is { onBattery: false,
+ * levelPercent: null } → decidePowerPlan() returns normal (safe default,
+ * no false positives). Manual "lowpower" mode works regardless.
+ */
+let batteryState = { onBattery: false, levelPercent: null, reported: false };
+
+/** Validate + cache one renderer battery report, then re-decide the plan.
+ *  Payloads come from our own preload, but house style is to validate at
+ *  the boundary anyway (splash/client both send; bad shapes are ignored). */
+function applyBatteryReport(payload) {
+  if (!payload || typeof payload !== "object") return;
+  const onBattery = payload.onBattery === true;
+  let level = null;
+  if (typeof payload.levelPercent === "number" && Number.isFinite(payload.levelPercent)
+      && payload.levelPercent >= 0 && payload.levelPercent <= 100) {
+    level = Math.round(payload.levelPercent);
+  }
+  const changed = batteryState.onBattery !== onBattery || batteryState.levelPercent !== level;
+  batteryState = { onBattery, levelPercent: level, reported: true };
+  if (changed) {
+    log(`battery report: onBattery=${onBattery} level=${level === null ? "unknown" : level + "%"}`);
+  }
+  refreshPowerPlan();
+}
+
+/** The battery snapshot fed into decidePowerPlan(). Blends the renderer's
+ *  report (level + charging flag) with powerMonitor's always-available
+ *  isOnBatteryPower() so an on-ac/on-battery event alone still flips the
+ *  charging side before any renderer report lands. */
+function readBatteryEnv() {
+  try {
+    if (typeof powerMonitor.isOnBatteryPower === "function") {
+      return { onBattery: powerMonitor.isOnBatteryPower(), levelPercent: batteryState.levelPercent };
+    }
+  } catch { /* fall through to the cached report */ }
+  return { onBattery: batteryState.onBattery, levelPercent: batteryState.levelPercent };
+}
+
+/** Re-decide the current plan and broadcast. Called once at boot, then on
+ *  every powerMonitor event, battery report, and mode toggle. */
+function refreshPowerPlan() {
+  const { decidePowerPlan } = require("./powerplan.js");
+  const before = powerPlanCache.mode;
+  powerPlanCache = decidePowerPlan(readBatteryEnv(), readSettings().powerSaveMode);
+  if (powerPlanCache.mode !== before) {
+    log(`power-plan ${before} → ${powerPlanCache.mode} (reason=${powerPlanCache.reason})`);
+    // The tray tooltip reflects the plan — refresh it so the user sees the
+    // ⚡ marker the moment the plan flips.
+    refreshTrayTooltip();
+  }
+  // Always push so the settings page's "currently: ..." hint stays fresh.
+  pushUpdateState();
+}
+
+/** Effective plan the renderer / env var should see. */
+function currentPowerPlan() {
+  if (!powerPlanCache || !powerPlanCache.mode) return { mode: "normal", reason: "init", source: "auto" };
+  return powerPlanCache;
+}
+
+/** Wire up the powerMonitor listeners. Called once from app.whenReady. */
+function startPowerMonitor() {
+  // Only on-battery / on-ac exist (there is NO "battery-changed" event —
+  // an earlier draft subscribed to one and it silently never fired). Level
+  // changes arrive via the renderer's batteryReport instead (see the
+  // batteryState comment). The 30s tick is a belt-and-suspenders for
+  // platforms where the events are late; unref'd so it never blocks exit.
+  try {
+    if (typeof powerMonitor.on === "function") {
+      powerMonitor.on("on-battery", () => refreshPowerPlan());
+      powerMonitor.on("on-ac", () => refreshPowerPlan());
+    }
+  } catch (err) {
+    log(`powerMonitor wiring failed: ${err && err.message ? err.message : err}`);
+  }
+  refreshPowerPlan();
+  const powerTick = setInterval(() => refreshPowerPlan(), 30000);
+  if (typeof powerTick.unref === "function") powerTick.unref();
+}
+
+/** Expose the current plan as an env-var object for callers that want to
+ *  inject it (currently unused — childEnv() inlines the value, see the
+ *  // Power-plan signal comment there). Kept as a documented helper so
+ *  other spawn sites (CI / smoke-test harnesses) can include it without
+ *  re-deriving the logic. */
+function _powerPlanEnv() {
+  return { DSH_DESKTOP_POWER_PLAN: currentPowerPlan().mode };
 }
 
 // ---- 插件 RPC 桥 (local HTTP bridge from the DSH host half) -----------------
@@ -3133,7 +3315,7 @@ function ensureTray() {
   if (tray) return;
   try {
     tray = new Tray(buildTrayImage());
-    tray.setToolTip(APP_NAME);
+    refreshTrayTooltip();
     rebuildTrayMenu();
     tray.on("click", () => showMainWindow());
   } catch (err) {
@@ -3144,23 +3326,39 @@ function ensureTray() {
   }
 }
 
+/** Update the tray tooltip with the current power-plan hint. Called from
+ *  ensureTray() and refreshPowerPlan() so the bolt glyph + level appear the
+ *  moment the plan flips. */
+function refreshTrayTooltip() {
+  if (!tray || tray.isDestroyed()) return;
+  const { formatPowerHint } = require("./powerplan.js");
+  tray.setToolTip(formatPowerHint(currentPowerPlan(), currentLocale()));
+}
+
 /**
  * Assemble the tray context menu: built-in entries (打开/退出) plus one
  * separated section per bridge plugin that contributed items via tray.setMenu
  * (registration order). Contributed item clicks route back to the plugin's
  * reverse channel as { event: "tray.click", id }. Rebuilt on every
  * tray.setMenu, on tray (re)creation, and when contributions reset.
+ *
+ * The built-in labels go through locales.js's `t()` so the tray follows the
+ * system locale the splash uses (AGENTS §15). Plugin-contributed labels are
+ * passed through untouched — those strings are authored by the plugin and
+ * only the plugin knows how to translate them.
  */
 function rebuildTrayMenu() {
   if (!tray) return;
+  const { t } = require("./locales.js");
+  const locale = currentLocale();
   const template = [
-    { label: "打开 DeepSeek Harness", click: () => showMainWindow() },
+    { label: t("tray.menu.open", locale, "打开鲸港"), click: () => showMainWindow() },
     {
       // Same restart chain as the app-menu Ctrl+Alt+R. The accelerator is
       // DISPLAY-ONLY in tray context menus (the working registration lives in
       // the app menu) — but Windows users have no visible menu bar at all, so
       // spelling the shortcut here is how they ever discover it.
-      label: "重启核心",
+      label: t("tray.menu.restartCore", locale, "重启核心"),
       accelerator: "CommandOrControl+Alt+R",
       click: () => { showMainWindow(); restartDSH(); }
     }
@@ -3177,7 +3375,7 @@ function rebuildTrayMenu() {
     }
   }
   template.push({ type: "separator" });
-  template.push({ label: "退出", click: () => { isQuitting = true; app.quit(); } });
+  template.push({ label: t("tray.menu.quit", locale, "退出"), click: () => { isQuitting = true; app.quit(); } });
   tray.setContextMenu(Menu.buildFromTemplate(template));
 }
 
@@ -3215,6 +3413,16 @@ function pushUpdateState() {
     allowFloatWindows: settings.allowFloatWindows,
     bundleMarket: settings.bundleMarket,
     coreChannel: settings.coreChannel,
+    powerSaveMode: settings.powerSaveMode,
+    // Effective power plan (after applying the user mode against the current
+    // battery state). The renderer only needs to know whether we are in
+    // lowpower now, plus the human-readable level for the tooltip / hint
+    // text — the underlying decidePowerPlan() lives in powerplan.js.
+    powerPlan: currentPowerPlan(),
+    // i18n locale (AGENTS §15). Every renderer-side string lookup goes
+    // through locales.js's t() with this value; main-process strings
+    // (tray menu, app menu, IPC messages) use the same source.
+    locale: currentLocale(),
     // Prerelease-aware direction guard: a dist-tag rollback or a channel
     // switch back (alpha → latest) must not flag an OLDER core as updatable —
     // the old `latest !== installed` let auto-update silently downgrade.
@@ -3776,6 +3984,19 @@ ipcMain.on("dsh:getThemeSync", (event) => {
   event.returnValue = currentTheme();
 });
 
+// Battery report from the renderer (splash at boot, DSH page on
+// chargingchange/levelchange) — the main process has no battery-level API,
+// so this is the only path the level can arrive by. See the batteryState
+// comment next to refreshPowerPlan(). Fire-and-forget: a bad payload is
+// dropped, the plan simply keeps its previous inputs.
+ipcMain.on("dsh:batteryReport", (_e, payload) => {
+  try {
+    applyBatteryReport(payload);
+  } catch (err) {
+    log(`batteryReport failed: ${err && err.message ? err.message : err}`);
+  }
+});
+
 // ---- update IPC (driven by the embedded DSH settings UI) -------------------
 // Renderer reads the current state, triggers a fresh check, toggles auto-update,
 // starts an update, and restarts the app.
@@ -4200,6 +4421,16 @@ ipcMain.handle("dsh:setAllowFloatWindows", (_e, value) => {
   if (value === false) closeAllFloatWindows(); // kill-switch is immediate
   return pushUpdateState();
 });
+ipcMain.handle("dsh:setPowerSaveMode", (_e, value) => {
+  // Whitelist: only the documented values are accepted. Anything else falls
+  // back to "auto" (the safe default) — see readSettings() + powerplan.js.
+  const mode = ["auto", "lowpower", "off"].indexOf(value) >= 0 ? value : "auto";
+  const write = writeSettings({ powerSaveMode: mode });
+  // Re-decide immediately so the tray tooltip + settings hint reflect the
+  // new mode without waiting for the next powerMonitor event.
+  refreshPowerPlan();
+  return withWriteError(pushUpdateState(), write);
+});
 
 // Dev/e2e hook (never set in production): DSH_DESKTOP_E2E_RESTARTS="N[,ms]"
 // auto-invokes restartDSH() N times, ms after each successful openDSH — this
@@ -4245,62 +4476,64 @@ function openDSH(url) {
 
 function buildMenu() {
   const isMac = process.platform === "darwin";
+  const { t } = require("./locales.js");
+  const locale = currentLocale();
   const template = [
     ...(isMac ? [{ role: "appMenu" }] : []),
     {
       label: "DSH",
       submenu: [
-        { label: "重新启动 DSH", accelerator: "CmdOrCtrl+Alt+R", click: () => restartDSH() },
+        { label: t("menu.dsh.restartCore", locale, "重新启动 DSH"), accelerator: "CmdOrCtrl+Alt+R", click: () => restartDSH() },
         { type: "separator" },
         // Native escape hatches: these always work even if the DSH-rendered
         // window controls are missing (plugin failure, frozen page, etc.).
-        { label: "最小化窗口", accelerator: "CmdOrCtrl+M", click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize(); } },
-        { label: "关闭窗口", accelerator: "CmdOrCtrl+W", click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close(); } },
+        { label: t("menu.dsh.minimize", locale, "最小化窗口"), accelerator: "CmdOrCtrl+M", click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize(); } },
+        { label: t("menu.dsh.close", locale, "关闭窗口"), accelerator: "CmdOrCtrl+W", click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close(); } },
         { type: "separator" },
         {
-          label: "在浏览器中打开",
+          label: t("menu.dsh.openInBrowser", locale, "在浏览器中打开"),
           enabled: () => Boolean(dshUrl),
           click: () => {
             if (dshUrl) shell.openExternal(dshUrl);
           }
         },
         { type: "separator" },
-        isMac ? { role: "close" } : { role: "quit", label: "退出" }
+        isMac ? { role: "close" } : { role: "quit", label: t("menu.dsh.quit", locale, "退出") }
       ]
     },
     {
-      label: "编辑",
+      label: t("menu.edit", locale, "编辑"),
       submenu: [
         // Standard edit roles: these are what makes Cmd/Ctrl+C/V/X/A actually
         // work on macOS (without an Edit menu, macOS does not route the
         // keyboard shortcuts to the renderer — the infamous "cannot copy /
         // paste / select all" bug in frameless Electron apps). They also add
         // the same shortcuts on Windows/Linux.
-        { role: "undo", label: "撤销" },
-        { role: "redo", label: "重做" },
+        { role: "undo", label: t("menu.edit.undo", locale, "撤销") },
+        { role: "redo", label: t("menu.edit.redo", locale, "重做") },
         { type: "separator" },
-        { role: "cut", label: "剪切" },
-        { role: "copy", label: "复制" },
-        { role: "paste", label: "粘贴" },
-        { role: "selectAll", label: "全选" }
+        { role: "cut", label: t("menu.edit.cut", locale, "剪切") },
+        { role: "copy", label: t("menu.edit.copy", locale, "复制") },
+        { role: "paste", label: t("menu.edit.paste", locale, "粘贴") },
+        { role: "selectAll", label: t("menu.edit.selectAll", locale, "全选") }
       ]
     },
     {
-      label: "视图",
+      label: t("menu.view", locale, "视图"),
       submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
+        { role: "reload", label: t("menu.view.reload", locale, "重新加载") },
+        { role: "forceReload", label: t("menu.view.forceReload", locale, "强制重新加载") },
+        { role: "toggleDevTools", label: t("menu.view.devTools", locale, "开发者工具") },
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        { role: "resetZoom", label: t("menu.view.resetZoom", locale, "实际大小") },
+        { role: "zoomIn", label: t("menu.view.zoomIn", locale, "放大") },
+        { role: "zoomOut", label: t("menu.view.zoomOut", locale, "缩小") },
         { type: "separator" },
-        { role: "togglefullscreen" }
+        { role: "togglefullscreen", label: t("menu.view.fullscreen", locale, "全屏") }
       ]
     },
     {
-      label: "窗口",
+      label: t("menu.window", locale, "窗口"),
       submenu: [
         { role: "minimize" },
         { role: "zoom" },
@@ -4323,6 +4556,11 @@ app.whenReady().then(() => {
   createWindow();
   startDSH();
   applyPreventSleep(); // restore persisted 阻止休眠
+  // Battery-friendly power plan (AGENTS §16). Wire BEFORE the tray is
+  // created so the first tray tooltip already reflects the current battery
+  // state — otherwise the user would see the old "WhaleHarbor" tooltip
+  // until the first powerMonitor event fires.
+  startPowerMonitor();
   // The bridge is the general plugin RPC carrier (tray menu contributions,
   // notifications, …), not just the 任务通知 transport — always listen. The
   // taskNotify toggle gates whether notifications POP, not the bridge itself.
@@ -4337,6 +4575,7 @@ app.whenReady().then(() => {
   // boot, then every 12h.
   setTimeout(checkShellUpdateSilent, 60000);
   setInterval(checkShellUpdateSilent, 12 * 60 * 60 * 1000);
+  log(`ui locale: ${currentLocale()} (app.getLocale=${app.getLocale()})`);
 
   // A second launch arrived while this instance was still booting: make sure
   // the (now created) window comes to the front.

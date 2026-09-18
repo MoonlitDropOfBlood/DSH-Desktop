@@ -8,6 +8,20 @@
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-18
+
+### 新增
+
+- **splash + 设置页 + 托盘/菜单 i18n（AGENTS §6c）**：新增纯函数模块 `locales.js`（zh-CN / en-US 两套词典 + `t()` / `detectLocale()`），壳级用户可见字符串走单一来源。`splash.html` 与 `dsh-desktop-plugin/client.js` 各内嵌一份同源副本，新增 `scripts/check-i18n-sync.js` 守卫两份副本与源端的逐 key 漂移（漏改任一份 CI 立刻红）。`main.js` 的托盘菜单 / 应用菜单 / 启动错误面板按钮（按「已知中文 label → 词典 key」反查表翻译，自定义 label 原样保留）也走同一套词典。`DSH_DESKTOP_LOCALE` 环境变量可覆盖系统 locale（`detectLocale` 做主子标签映射，`en-GB` → `en-US` 而不是粗暴回落中文）；`getThemeSync` 同步返回 `locale`，splash 首帧前消费避免主题 + 语言双闪烁，client 插件 slot 注册 label 也用它同步解析（`<html lang>` 异步就绪前唯一可靠的同步信号）。范围说明（如实）：错误面板的 message/detail 正文与 LEGACY 路径（≤0.1.4 核心的 Session log 胶囊，§4 冻结）本期保持中文，后续批次补。
+- **电池友好模式（AGENTS §6d）**：新增纯函数模块 `powerplan.js`（`decidePowerPlan()` + `formatPowerHint()`），核心是「未插电且电量 < 20%」自动降级（auto / lowpower / off 三档位，设置 → 桌面版可选）。**电量来源是 renderer 上报而非主进程**——对照 `electron.d.ts` 验证：主进程 `powerMonitor` 只有 `isOnBatteryPower()` + `on-battery` / `on-ac` 事件，**没有任何电量 API**（草稿曾调用不存在的 `getBatteryLevel`/`isOnBattery`/`battery-changed`，auto 模式静默失效，review 阶段实测抓出并重写）。现在 splash 启动即上报一次、DSH 长驻页面订阅 `chargingchange`/`levelchange` 持续上报（Chromium Battery Status API，`file://` 与 `127.0.0.1` 均为安全上下文），经新 IPC `dsh:batteryReport`（边界校验：非法形状丢弃、电量钳制 0–100）进主进程缓存；未上报前安全默认 normal，绝不误降级。判定结果两条路径广播：① `pushUpdateState().powerPlan` 给 renderer（设置页「当前：低功耗（12%）」提示，电量未知时用短标签「低功耗」、绝不出现 `?%` 占位符）+ 托盘 tooltip ⚡ 标记；② `DSH_DESKTOP_POWER_PLAN` 环境变量给 spawn 出去的 DSH 核心（whpromo 等下游插件启动期读 env 决定是否拉长心跳轮询——本期只发信号，whpromo 实际代码在其独立仓库独立发版）。`powerMonitor` 事件 + 30s 兜底轮询（`unref` 不阻塞退出）驱动重判。
+- **新增真机 e2e `npm run test:e2e:i18n-power`**（`scripts/e2e-i18n-powerplan.js`）：隔离 USER_DATA/HOME/PORT + junction 复用真实托管安装，两阶段断言——种子 `powerSaveMode=lowpower` 后日志出现 `power-plan normal → lowpower` 且 spawn env 携带 `DSH_DESKTOP_POWER_PLAN=lowpower`；`DSH_DESKTOP_LOCALE=en-US` 下 `ui locale: en-US`；两阶段核心带 token URL 健康启动且日志无 uncaughtException。开发过程中的教训已写进脚本注释：漏传 `DSH_DESKTOP_USER_DATA` 会让 shell 撞用户真实单实例锁静默退出、隔离日志永远为空。
+
+### 变更
+
+- **`update-settings.json` 新增 `powerSaveMode: "auto"|"lowpower"|"off"`**（默认 `"auto"`）；沿用既有 `readSettings()` / `pushUpdateState()` / IPC 三件套（新增 `dsh:setPowerSaveMode` + `dshDesktop.setPowerSaveMode`）；无效值在 read 端 fall back 到 `auto`，永不拒绝。
+- **electron-builder `build.files` 白名单**加 `locales.js` + `powerplan.js`（与既有 `core-version.js` / `shell-asset.js` / `settings-json.js` / `plugin-recovery.js` / `url-extract.js` 同列），打包版不出现「Cannot find module」回归。
+- **测试链加 2 个新单测 + 1 个守卫**：`scripts/test-locales.js`（约 40 个 t/detectLocale/词典完整性断言，含「splash 引用的 key 必须存在」）、`scripts/test-powerplan.js`（约 26 个 decidePowerPlan + formatPowerHint 断言，含无电量短标签分支）、`scripts/check-i18n-sync.js`，全部并入 `npm test`。
+
 ## [1.9.5] - 2026-09-18
 
 ### 修复

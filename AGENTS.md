@@ -152,6 +152,24 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 
 `coreChannelTag()`/`coreSpec()` 把渠道映射为 npm dist-tag；**安装、版本检查、自动更新全走当前渠道**；`DSH_DESKTOP_SPEC` 优先。渠道暂无发布版本 → `queryLatest` 返回 null → 显示"已是最新"，不报错。切换渠道立即重查刷新显示。UI 文案在 client.js 的 `CORE_CHANNELS`/`CHANNEL_LABEL`。
 
+### 6c. 界面 i18n（locales.js + 内嵌副本 + sync 守卫）
+
+- **唯一源 = `locales.js`**：纯函数模块导出 `t(key, locale, fallback?, vars?)` + `detectLocale(acceptLanguage)` + `SUPPORTED_LOCALES`（`["zh-CN", "en-US"]`，新增语种先扩这里再加词典）；未知 key 永远不抛、走 `fallback` → 默认 locale → key 本身（可定位的「红色」调试位）；不支持的 locale 全部回落到 `zh-CN` —— **永远不要**把不在 SUPPORTED 列表的 locale 直接透传给用户（暴露没翻译的语种比强行翻译更糟）。
+- **三处必须内嵌副本**：`splash.html`、`dsh-desktop-plugin/client.js`、以及任何未来加的"不能 `require()` 的渲染端"。每个副本顶部都带 `I18N = { ... }` 副本 + 极简 `t()` 函数，**与 `locales.js` 字节级同步**。CI 守卫 = `scripts/check-i18n-sync.js`：用 brace+string-aware extractor 抓出每个副本的字典，逐 key 与 `_DICTIONARIES` 比对；任何 drift 立刻红。改 i18n 三步：① 改 `locales.js` 源；② 同步复制到所有内嵌副本；③ 跑 `npm test`（含 `check-i18n-sync`）确认绿。
+- **locale 三处下发**：① `app.getLocale()` → `currentLocale()` → `getThemeSync().locale` → splash 在首帧前消费，避免主题 + 语言双闪烁；② `pushUpdateState().locale` → renderer 侧 `useLocale()`；③ `<html lang>` 由 renderer 同步设、`registerSettingsNavIcons` 监听 `MutationObserver` 在 locale 切换时清旧 marker 重匹配。`DSH_DESKTOP_LOCALE` 环境变量覆盖系统 locale（CI / 调试用）。
+- **DSH slot label 是注册时一次性**：ctx.slots.register 的 `label` 字段由 DSH 内部缓存、不响应运行时 locale 切换。slot 注册时用 `resolveInitialLocale()` 拿当前语种——**优先走 `getThemeSync().locale`**（sendSync IPC，注册时刻唯一可靠的同步信号；`<html lang>` 在 DSH 文档刚加载时尚未就绪，异步 `getUpdateState` 更没回来，曾导致 en-US 用户 slot label 永远落 zh-CN）；运行时切语种需要重启 DSH 才生效（**刻意保留**，避免 DSH 内部多处缓存 label 不一致）。设置 nav 行匹配（`registerSettingsNavIcons`）则完全跑 `MutationObserver`，每次按 `<html lang>` 当前值重算标签、不匹配即摘除旧 marker。
+- **locale 切换不重启壳**：locale 变化仅推送 `dsh:update-state.locale` + `dsh:theme.locale`；壳进程本身不动；renderer 自己重新渲染。
+- **i18n 测试必锁**：新增 key 必须在 `scripts/test-locales.js` 里加断言（至少 zh-CN + en-US 两条），否则该 key 实际是"默默未翻译"。
+
+### 6d. 电池友好（powerplan.js + powerMonitor + renderer 电量上报）
+
+- **唯一源 = `powerplan.js`**：`decidePowerPlan({onBattery, levelPercent}, mode)` 纯函数（`mode ∈ {"auto","lowpower","off"}`），`LOW_BATTERY_THRESHOLD === 20`（exclusive：`20%` 不算低电）。无效输入永不抛，未知 mode 回落到 `"auto"`。`formatPowerHint(plan, locale)` 给托盘 tooltip 用，⚡ 前缀写在 helper 里（不在词典），保证各语种一致；电量未知时降级短标签 `power.lowpower.short`（绝不渲染 `?%` 或裸 `{level}` 占位符）。
+- **三档语义不可改**：auto = 未插电 + 电量 < 20% 时低功耗；lowpower = 强制低功耗；off = 强制正常。**auto 永不主动把电池良好的笔记本降级**（兜底：`levelPercent=null` = 电量未知 = 始终 normal，绝不误报）。
+- **主进程没有电量 API（2026-09 对照 electron.d.ts 实证）**：`powerMonitor` 的电池面只有 `isOnBatteryPower()`（方法）+ `onBatteryPower`（属性）+ `on-battery` / `on-ac` 两事件；**不存在** `getBatteryLevel`、`isOnBattery`、`battery-changed`（草稿调用过这些幻影 API，auto 静默失效——勿再引入）。**电量唯一来源 = renderer 上报**：splash 启动即报一次、DSH 长驻页面订阅 `chargingchange`/`levelchange` 持续报，走 `dsh:batteryReport` IPC（入口校验：非法形状丢弃、电量钳 0–100）；未上报前安全默认 normal。**只在 mode 变化时调 `refreshTrayTooltip()`**（setToolTip 触发平台重绘，别刷屏）。
+- **两条广播路径**：① `pushUpdateState().powerPlan` 给 renderer（设置页「当前：…」提示 + 托盘 tooltip）；② `childEnv().DSH_DESKTOP_POWER_PLAN` 给 spawn 出去的 DSH 核心（whpromo 等下游插件启动期读 env；本期只发信号，whpromo 实际轮询逻辑在其独立仓库独立发版）。**env 是 boot-time 信号**，运行时切档靠 IPC。
+- **IPC `dsh:setPowerSaveMode`**：白名单 `["auto","lowpower","off"]`，无效值在 read 端 fall back（永不 reject —— 与 `coreChannel` 同语义）。
+- **测试必锁**：`scripts/test-powerplan.js` 覆盖三档 × 边界（19% / 20% / null level / 无 level 字段）+ tooltip 本地化与短标签分支，缺一不可；真机闭环 `npm run test:e2e:i18n-power`（种子 lowpower → 日志 + spawn env 断言；`DSH_DESKTOP_LOCALE=en-US` → `ui locale: en-US`）。**e2e 脚本红线：spawn 必须带 `DSH_DESKTOP_USER_DATA`/`DSH_DESKTOP_HOME` 隔离——漏传会撞用户真实单实例锁静默退出，隔离日志永远为空（2026-09 实测大坑）。**
+
 ### 7. 图标
 
 源 = `build/whale.svg`；`npm run icon` 用 `@resvg/resvg-js` 光栅化（**不要用 Electron 离屏渲染**，>128px 崩）；electron-builder 自动转 .ico/.icns；Windows 任务栏图标开发态显示 electron 默认（固有限制）。
@@ -182,7 +200,8 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 ```bash
 npm install          # 装依赖（首次）
 npm test             # 全部零依赖单测（url-extract / plugin-recovery / core-version /
-                     #   shell-asset / settings-json / 宣传页守卫）——CI 的 ci.yml 每次 push/PR 都跑
+                     #   shell-asset / settings-json / locales / powerplan /
+                     #   check-i18n-sync / 宣传页守卫）——CI 的 ci.yml 每次 push/PR 都跑
 npm run icon         # 重新生成图标（改了鲸鱼配色/边距后）
 npm start            # 开发运行（frameless 窗口）
 npm run fetch:market # 下载内置插件市场到 build/market-plugin/（dist:* 会自动跑）
@@ -195,7 +214,7 @@ npm run dist:win     # NSIS 安装包（dist:mac / dist:linux / dist:portable �
 **测试分层（2026-09-16 起）**：
 
 - **CI 可跑**：`npm test` 全部零 npm 依赖，`.github/workflows/ci.yml` 在每次 push/PR 上跑它 + 对所有追踪 .js 的 `node --check` 语法清扫。**改正则/版本语义/设置解析相关代码，测试必须先过。**
-- **必须真机（非沙箱，绝不进 CI）**：`npm run test:e2e:recovery`（插件故障自愈全链路，需 GUI + taskkill）、`npm run test:e2e:float`（浮窗，需对活壳实例 + `DSH_DESKTOP_NOTIFY_TOKEN`）、`npm run repro:restart-race`、`npm run repro:plugin-failure`。运行时路径默认自动探测（打包安装 / dev 的 `build/node`），可用 `DSH_DESKTOP_TEST_NODE`（node 可执行文件）与 `DSH_DESKTOP_TEST_MANAGED`（DSH 托管目录）覆盖。
+- **必须真机（非沙箱，绝不进 CI）**：`npm run test:e2e:recovery`（插件故障自愈全链路，需 GUI + taskkill）、`npm run test:e2e:i18n-power`（i18n locale + 电源计划全链路）、`npm run test:e2e:float`（浮窗，需对活壳实例 + `DSH_DESKTOP_NOTIFY_TOKEN`）、`npm run repro:restart-race`、`npm run repro:plugin-failure`。运行时路径默认自动探测（打包安装 / dev 的 `build/node`），可用 `DSH_DESKTOP_TEST_NODE`（node 可执行文件）与 `DSH_DESKTOP_TEST_MANAGED`（DSH 托管目录）覆盖。
 
 **开发运行注意**：
 
@@ -263,4 +282,6 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_TEST_NODE` | 真机 e2e/repro 脚本的 node 可执行文件覆盖（默认自动探测） |
 | `DSH_DESKTOP_TEST_MANAGED` | 真机 e2e/repro 脚本的 DSH 托管目录覆盖 |
 | `DSH_DESKTOP_WINCODESIGN_CACHE` | embed-exe-icon 的 winCodeSign 缓存根覆盖 |
+| `DSH_DESKTOP_LOCALE` | 覆盖界面 locale（默认 `app.getLocale()`；值必须在 locales.js 的 SUPPORTED 列表内；CI/调试用） |
+| `DSH_DESKTOP_POWER_PLAN` | **下游只读（主进程 spawn 时写入）**：当前生效的电源计划（`lowpower` / `normal`）；whpromo 等插件启动期读 env 决定是否降级心跳轮询 |
 | `WHPROMO_*`（REPO/MIRRORS/RELEASE_JSON） | whaleharbor-promo 插件环境变量（见 docs/agents/plugins-and-market.md §2c） |

@@ -19,10 +19,19 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   startupChoice: (payload) => ipcRenderer.send("dsh:startupChoice", payload),
   // copy error text to the system clipboard (reliable, main-process side)
   copyText: (text) => ipcRenderer.send("dsh:copyText", text),
+  // Battery report (fire-and-forget): the main process has NO battery-level
+  // API, so the renderer's Chromium Battery Status API is the only source
+  // for the level. Payload { onBattery: boolean, levelPercent: 0..100|null }.
+  // The splash reports once at boot; the DSH page keeps reporting on
+  // chargingchange/levelchange. See AGENTS §6d.
+  reportBatteryState: (state) => ipcRenderer.send("dsh:batteryReport", state),
   // frameless window controls
   windowControl: (action) => ipcRenderer.send("dsh:window", action),
   // ---- theme (appearance) ----
-  // Synchronous theme query for first paint: { preference, systemDark }.
+  // Synchronous theme query for first paint: { preference, systemDark, locale }.
+  // locale follows Electron's app.getLocale() (system locale at launch; can be
+  // overridden with DSH_DESKTOP_LOCALE), and drives the splash + settings
+  // UI language. See AGENTS §15.
   getThemeSync: () => ipcRenderer.sendSync("dsh:getThemeSync"),
   // Live theme push when the user changes appearance in DSH settings.
   onThemeChange: (cb) => subscribe("dsh:theme", cb),
@@ -37,6 +46,9 @@ contextBridge.exposeInMainWorld("dshDesktop", {
   setInheritTerminalProfile: (value) => ipcRenderer.invoke("dsh:setInheritTerminalProfile", value),
   setAllowFloatWindows: (value) => ipcRenderer.invoke("dsh:setAllowFloatWindows", value),
   setBundleMarket: (value) => ipcRenderer.invoke("dsh:setBundleMarket", value),
+  // Power-plan mode (AGENTS §16): auto / lowpower / off. Invalid values fall
+  // back to "auto" on the main process side.
+  setPowerSaveMode: (value) => ipcRenderer.invoke("dsh:setPowerSaveMode", value),
   installUpdate: () => ipcRenderer.invoke("dsh:installUpdate"),
   restartApp: () => ipcRenderer.invoke("dsh:restartApp"),
   // Restart ONLY the DSH core (same chain as Ctrl/Cmd+Alt+R); resolves to true

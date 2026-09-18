@@ -53,6 +53,224 @@ window.__ModuleLoader__.load({
 		const Button = ui.Button;
 		const Toast = ui.Toast;
 
+		// ---- i18n (AGENTS §15) --------------------------------------------
+		// Self-contained copy of locales.js's dictionaries — the client plugin
+		// is a single IIFE bundle loaded by DSH's module loader, so it cannot
+		// `require()`. `scripts/check-i18n-sync.js` keeps this in lockstep
+		// with the source-of-truth. Never edit one without the other.
+		var I18N = {
+			"zh-CN": {
+				"settings.section.core": "核心",
+				"settings.section.desktop": "桌面版",
+				"windowControls.aria": "窗口控制",
+				"window.minimize": "最小化",
+				"window.maximize": "最大化 / 还原",
+				"window.close": "关闭",
+				"core.version": "核心版本",
+				"core.version.unknown": "未知",
+				"core.latest": "最新 {version}",
+				"core.channel": "更新渠道",
+				"core.channel.hint": "按 npm 的 {channel} 标签检查/安装更新",
+				"core.channel.latest": "稳定版（latest）",
+				"core.channel.next": "体验版（next）",
+				"core.channel.alpha": "实验版（alpha）",
+				"core.channel.label.latest": "稳定版",
+				"core.channel.label.next": "体验版",
+				"core.channel.label.alpha": "实验版",
+				"core.autoUpdate": "自动更新",
+				"core.check": "检查更新",
+				"core.checking": "检查中…",
+				"core.install": "更新到 {version}",
+				"core.installing": "更新中…",
+				"core.upToDate": "已是最新版本",
+				"core.checkFailed": "检查失败，请检查网络",
+				"core.installFailed": "更新失败",
+				"core.channelChanged": "更新渠道已切换为「{channel}」，检查更新将按 npm 的 {tag} 标签进行",
+				"core.restart": "重启核心",
+				"core.restarting": "重启中…",
+				"core.restart.started": "正在重启核心…",
+				"core.restart.busy": "核心正在更新或已在重启中，请稍后再试",
+				"core.restart.failed": "重启失败，请重试",
+				"core.restart.hint": "停止并重新拉起 DSH 核心进程（窗口会短暂回到启动页）；更新渠道等改动借此生效。",
+				"core.shortcut.win": "快捷键：Ctrl+R 刷新页面；Ctrl+Alt+R 重启核心",
+				"core.shortcut.mac": "快捷键：⌘ R 刷新页面；⌘ ⌥ R 重启核心",
+				"core.updateBadge.title": "发现新版本 {latest}（当前 {installed}），点击更新",
+				"core.updateBadge.confirm.title": "再次点击确认安装（误触保护，会先停止核心）",
+				"core.updateBadge.label": "有新版 {latest}",
+				"core.updateBadge.confirm.label": "再次点击确认安装",
+				"shell.updateBadge.title": "鲸港新版本 {latest}（当前 {current}），点击两次下载安装",
+				"shell.updateBadge.confirm.title": "再次点击下载并安装（误触保护）",
+				"shell.updateBadge.label": "鲸港新版 {latest}",
+				"shell.updateBadge.confirm.label": "再次点击装 {latest}",
+				"desktop.shellVersion": "壳版本",
+				"desktop.shellCheck": "检查更新",
+				"desktop.shellChecking": "检查中…",
+				"desktop.shellUpToDate": "壳已是最新版本 {version}",
+				"desktop.shellCheckFailed": "检查失败",
+				"desktop.shellDownload": "下载 {version} 安装包",
+				"desktop.shellDownloading": "下载中 {percent}%",
+				"desktop.shellDownloading.undef": "下载中…",
+				"desktop.shellDownloaded": "更新包已下载，正在启动安装程序…",
+				"desktop.shellDownloadFailed": "下载失败",
+				"desktop.shellDownloadFailed.prefix": "下载失败：{error}",
+				"desktop.shellNewVersion": "发现新版本 {version}",
+				"desktop.shellProgress.hint": "正在下载更新包：{percent}%（{downloaded} / {total} MB）",
+				"desktop.closeToTray": "常驻通知栏",
+				"desktop.closeToTray.enabled": "已开启：关闭窗口将最小化到通知栏",
+				"desktop.closeToTray.disabled": "已关闭：关闭窗口即退出",
+				"desktop.closeToTray.hint": "开启后：点关闭按钮不退出，最小化到通知栏；通知栏图标右键可「打开鲸港」或「退出」。",
+				"desktop.preventSleep": "阻止休眠",
+				"desktop.preventSleep.enabled": "已开启：任务运行期间阻止系统休眠",
+				"desktop.preventSleep.disabled": "已关闭：允许系统正常休眠",
+				"desktop.taskNotify": "任务通知",
+				"desktop.taskNotify.enabled": "已开启：主任务完成、失败或需确认时发送桌面通知",
+				"desktop.taskNotify.disabled": "已关闭：不再发送任务通知",
+				"desktop.taskNotify.hint": "任务通知：主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）。",
+				"desktop.inheritTerminalProfile": "继承终端 Profile",
+				"desktop.inheritTerminalProfile.enabled": "已开启：将继承终端 Profile（需重启 DSH 生效）",
+				"desktop.inheritTerminalProfile.disabled": "已关闭：不再继承终端 Profile（需重启 DSH 生效）",
+				"desktop.inheritTerminalProfile.hint": "继承终端 Profile：自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，建议保持开启（改动需重启 DSH 生效）。",
+				"desktop.bundleMarket": "插件市场",
+				"desktop.bundleMarket.enabled": "已开启：下次启动 DSH 时挂载内置插件市场",
+				"desktop.bundleMarket.disabled": "已关闭：下次启动 DSH 起不再挂载内置插件市场",
+				"desktop.bundleMarket.hint": "内置插件市场（dshmarket）：随壳自带、免下载安装，可浏览/搜索/一键安装社区插件。若你已在 DSH profile 中自行安装过插件市场，以你的安装为准（不会重复挂载）；改动需重启 DSH 生效。",
+				"desktop.allowFloatWindows": "允许插件浮窗",
+				"desktop.allowFloatWindows.enabled": "已开启：插件可创建桌面浮窗（如桌面宠物）",
+				"desktop.allowFloatWindows.disabled": "已关闭：插件浮窗已全部关闭",
+				"desktop.allowFloatWindows.hint": "允许插件创建桌面悬浮窗口（如随任务状态变化的桌面宠物）。关闭后现有浮窗立即消失，插件也无法再创建。",
+				"desktop.powerSaveMode": "低功耗模式",
+				"desktop.powerSaveMode.auto": "自动（未插电且电量 < 20% 时启用）",
+				"desktop.powerSaveMode.lowpower": "始终启用（暂停浮窗动画、拉长心跳轮询）",
+				"desktop.powerSaveMode.off": "始终关闭",
+				"desktop.powerSaveMode.hint": "笔记本用户可选：未插电且电量低于 20% 时自动降低非关键后台活动（桌面宠物动画、whpromo 心跳轮询）。whpromo 升级到对应版本后生效。",
+				"desktop.powerSaveMode.active.hint": "当前：{state}",
+				"desktop.toggle.on": "已开启",
+				"desktop.toggle.off": "已关闭",
+				"settings.noBridge": "（在浏览器中运行，未检测到桌面外壳）",
+				"power.lowpower.label": "低功耗（{level}%）",
+				"power.lowpower.short": "低功耗",
+				"power.normal.label": "正常",
+				"power.lowpower.hint": "电池电量低，已自动进入低功耗模式"
+			},
+			"en-US": {
+				"settings.section.core": "Core",
+				"settings.section.desktop": "Desktop",
+				"windowControls.aria": "Window controls",
+				"window.minimize": "Minimize",
+				"window.maximize": "Maximize / restore",
+				"window.close": "Close",
+				"core.version": "Core version",
+				"core.version.unknown": "Unknown",
+				"core.latest": "Latest {version}",
+				"core.channel": "Update channel",
+				"core.channel.hint": "Checks / installs follow npm's {channel} dist-tag",
+				"core.channel.latest": "Stable (latest)",
+				"core.channel.next": "Preview (next)",
+				"core.channel.alpha": "Experimental (alpha)",
+				"core.channel.label.latest": "Stable",
+				"core.channel.label.next": "Preview",
+				"core.channel.label.alpha": "Experimental",
+				"core.autoUpdate": "Auto-update",
+				"core.check": "Check for updates",
+				"core.checking": "Checking…",
+				"core.install": "Update to {version}",
+				"core.installing": "Updating…",
+				"core.upToDate": "Already up to date",
+				"core.checkFailed": "Check failed, please verify your network",
+				"core.installFailed": "Update failed",
+				"core.channelChanged": "Update channel switched to \"{channel}\"; checks now follow npm's {tag} dist-tag",
+				"core.restart": "Restart core",
+				"core.restarting": "Restarting…",
+				"core.restart.started": "Restarting core…",
+				"core.restart.busy": "Core is updating or already restarting — please retry shortly",
+				"core.restart.failed": "Restart failed, please retry",
+				"core.restart.hint": "Stops and respawns the DSH core (window briefly returns to the splash page); changes like the update channel take effect this way.",
+				"core.shortcut.win": "Shortcuts: Ctrl+R reload · Ctrl+Alt+R restart core",
+				"core.shortcut.mac": "Shortcuts: ⌘ R reload · ⌘ ⌥ R restart core",
+				"core.updateBadge.title": "New core version {latest} (installed {installed}) — click to update",
+				"core.updateBadge.confirm.title": "Click again to confirm (mis-click guard; stops the core first)",
+				"core.updateBadge.label": "Update {latest}",
+				"core.updateBadge.confirm.label": "Click again to confirm",
+				"shell.updateBadge.title": "WhaleHarbor {latest} (current {current}) — click twice to download & install",
+				"shell.updateBadge.confirm.title": "Click again to download & install (mis-click guard)",
+				"shell.updateBadge.label": "WhaleHarbor {latest}",
+				"shell.updateBadge.confirm.label": "Click again to install {latest}",
+				"desktop.shellVersion": "Shell version",
+				"desktop.shellCheck": "Check for updates",
+				"desktop.shellChecking": "Checking…",
+				"desktop.shellUpToDate": "Shell is up to date {version}",
+				"desktop.shellCheckFailed": "Check failed",
+				"desktop.shellDownload": "Download {version} installer",
+				"desktop.shellDownloading": "Downloading {percent}%",
+				"desktop.shellDownloading.undef": "Downloading…",
+				"desktop.shellDownloaded": "Installer downloaded, launching…",
+				"desktop.shellDownloadFailed": "Download failed",
+				"desktop.shellDownloadFailed.prefix": "Download failed: {error}",
+				"desktop.shellNewVersion": "New version {version}",
+				"desktop.shellProgress.hint": "Downloading installer: {percent}% ({downloaded} / {total} MB)",
+				"desktop.closeToTray": "Keep in tray",
+				"desktop.closeToTray.enabled": "Enabled: closing the window minimizes to the system tray",
+				"desktop.closeToTray.disabled": "Disabled: closing the window quits the app",
+				"desktop.closeToTray.hint": "When enabled, clicking the close button no longer quits — the app keeps running in the system tray.",
+				"desktop.preventSleep": "Prevent sleep",
+				"desktop.preventSleep.enabled": "Enabled: keeps the system awake while tasks run",
+				"desktop.preventSleep.disabled": "Disabled: the system can sleep normally",
+				"desktop.taskNotify": "Task notifications",
+				"desktop.taskNotify.enabled": "Enabled: native notifications for main-task done / failed / needs confirmation",
+				"desktop.taskNotify.disabled": "Disabled: no task notifications",
+				"desktop.taskNotify.hint": "Task notifications: a desktop notification appears when the main task completes, fails or needs your confirmation (sub-tasks stay silent).",
+				"desktop.inheritTerminalProfile": "Inherit terminal profile",
+				"desktop.inheritTerminalProfile.enabled": "Enabled: terminal profile is inherited (requires a DSH restart)",
+				"desktop.inheritTerminalProfile.disabled": "Disabled: terminal profile is no longer inherited (requires a DSH restart)",
+				"desktop.inheritTerminalProfile.hint": "Inherit terminal profile: pulls PATH and friends from the user's login shell so MCP servers and other child processes can find their executables. macOS launches from Finder without one — keeping this on is recommended. Takes effect after a DSH restart.",
+				"desktop.bundleMarket": "Plugin marketplace",
+				"desktop.bundleMarket.enabled": "Enabled: built-in marketplace mounts on the next DSH start",
+				"desktop.bundleMarket.disabled": "Disabled: built-in marketplace is no longer mounted",
+				"desktop.bundleMarket.hint": "Built-in marketplace (dshmarket): ships with the shell — no manual install needed. If you already installed the marketplace into your DSH profile yourself, your copy wins (no double-mount). Takes effect after a DSH restart.",
+				"desktop.allowFloatWindows": "Allow plugin float windows",
+				"desktop.allowFloatWindows.enabled": "Enabled: plugins may create desktop float windows (e.g. desktop pets)",
+				"desktop.allowFloatWindows.disabled": "Disabled: all plugin float windows closed",
+				"desktop.allowFloatWindows.hint": "Lets plugins create small always-on-top windows (e.g. a desktop pet that mirrors task state). Toggling off closes any open float windows immediately.",
+				"desktop.powerSaveMode": "Low-power mode",
+				"desktop.powerSaveMode.auto": "Auto (engages below 20% on battery)",
+				"desktop.powerSaveMode.lowpower": "Always on (pauses float-window animation, lengthens heartbeat polling)",
+				"desktop.powerSaveMode.off": "Always off",
+				"desktop.powerSaveMode.hint": "For laptop users: when unplugged and the battery drops below 20%, non-essential background activity (float-window animation, whpromo heartbeats) quiets down. Takes effect after whpromo is updated.",
+				"desktop.powerSaveMode.active.hint": "Currently: {state}",
+				"desktop.toggle.on": "On",
+				"desktop.toggle.off": "Off",
+				"settings.noBridge": "(Running in a browser — desktop shell not detected)",
+				"power.lowpower.label": "Low power ({level}%)",
+				"power.lowpower.short": "Low power",
+				"power.normal.label": "Normal",
+				"power.lowpower.hint": "Battery low, low-power mode engaged automatically"
+			}
+		};
+		var DEFAULT_LOCALE = "zh-CN";
+		function detectClientLocale(pref) {
+			if (pref && I18N[pref]) return pref;
+			return DEFAULT_LOCALE;
+		}
+		function interpolateClient(tpl, vars) {
+			if (!vars) return tpl;
+			return String(tpl).replace(/\{(\w+)\}/g, function (m, name) {
+				return Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m;
+			});
+		}
+		function tClient(key, locale, vars) {
+			var d = I18N[locale] || I18N[DEFAULT_LOCALE] || {};
+			var v = d[key];
+			if (v === undefined || v === null) {
+				if (locale !== DEFAULT_LOCALE) {
+					var def = I18N[DEFAULT_LOCALE] || {};
+					var dv = def[key];
+					if (dv !== undefined && dv !== null) return interpolateClient(dv, vars);
+				}
+				return interpolateClient(String(key), vars);
+			}
+			return interpolateClient(v, vars);
+		}
+
 		// Window-button glyphs as inline SVG (Lucide geometry): one shared
 		// 24-unit viewBox rendered at 12px with a 2-unit round stroke, so all
 		// three glyphs share an identical optical size and stroke weight. The
@@ -125,6 +343,26 @@ window.__ModuleLoader__.load({
 				updateStateStore.getSnapshot,
 				updateStateStore.getSnapshot
 			);
+		}
+
+		/** Convenience hook: the locale from the shared update state. Falls
+		 *  back to the default locale until the bridge has answered. The
+		 *  renderer never reads the locale independently — it always comes
+		 *  through the main-process IPC so the tray / splash / settings
+		 *  pages all switch together. */
+		function useLocale() {
+			const state = useUpdateState();
+			return detectClientLocale(state && state.locale);
+		}
+		/** Convenience hook: the effective power plan + the user-selected
+		 *  mode. The settings page reads mode for the toggle's selected
+		 *  option; plan is for the "currently: ..." hint. */
+		function usePowerPlan() {
+			const state = useUpdateState();
+			return {
+				mode: state && state.powerSaveMode ? state.powerSaveMode : "auto",
+				plan: state && state.powerPlan ? state.powerPlan : { mode: "normal", reason: "unknown", source: "auto" }
+			};
 		}
 
 		// ---- 1. frameless window controls (top-right, immersive) ----------------
@@ -411,6 +649,7 @@ window.__ModuleLoader__.load({
 
 		function WindowControls(props) {
 			const controlsRef = React.useRef(null);
+			const locale = useLocale();
 			// Button rendering comes from the shared mode store: LEGACY renders
 			// the strip's 44px buttons + the re-hosted capsule exactly as before;
 			// MODERN renders the small native-style corner group (the drag
@@ -547,10 +786,11 @@ window.__ModuleLoader__.load({
 			// DOM node, so the slot's next render crashed reconciliation and the
 			// buttons went dead — never reparent a React-owned node by hand.)
 			const isLegacy = placement === PLACEMENT.LEGACY;
+			const ariaLabel = tClient("windowControls.aria", locale);
 			return ReactDOM.createPortal(
 				React.createElement(
 					"div",
-					{ ref: controlsRef, className: "dsh-desktop-controls", role: "group", "aria-label": "窗口控制" },
+					{ ref: controlsRef, className: "dsh-desktop-controls", role: "group", "aria-label": ariaLabel },
 					React.createElement("div", { className: "dsh-desktop-drag-side" }),
 					React.createElement("div", { className: "dsh-desktop-drag" }),
 					// LEGACY cores (≤0.1.4) only: re-host the Session log capsule
@@ -559,18 +799,18 @@ window.__ModuleLoader__.load({
 					isLegacy
 						? React.createElement(SessionLogButton, { sessions: props && props.sessions })
 						: null,
-					isLegacy ? React.createElement(WindowBtn, { kind: "minimize", title: "最小化" }) : null,
-					isLegacy ? React.createElement(WindowBtn, { kind: "toggleMaximize", title: "最大化 / 还原" }) : null,
-					isLegacy ? React.createElement(WindowBtn, { kind: "close", title: "关闭" }) : null,
+					isLegacy ? React.createElement(WindowBtn, { kind: "minimize", title: tClient("window.minimize", locale) }) : null,
+					isLegacy ? React.createElement(WindowBtn, { kind: "toggleMaximize", title: tClient("window.maximize", locale) }) : null,
+					isLegacy ? React.createElement(WindowBtn, { kind: "close", title: tClient("window.close", locale) }) : null,
 					// MODERN (0.1.5+): native-style corner group, aligned with
 					// DSH's own 28px button rows and sitting right of the
 					// rightbar's own control in every UI state (see the mode
 					// store comment for the three cases).
 					!isLegacy
-						? React.createElement("div", { className: "dsh-desktop-corner-group", role: "group", "aria-label": "窗口控制" },
-							React.createElement(MiniWindowBtn, { kind: "minimize", title: "最小化" }),
-							React.createElement(MiniWindowBtn, { kind: "toggleMaximize", title: "最大化 / 还原" }),
-							React.createElement(MiniWindowBtn, { kind: "close", title: "关闭" }))
+						? React.createElement("div", { className: "dsh-desktop-corner-group", role: "group", "aria-label": ariaLabel },
+							React.createElement(MiniWindowBtn, { kind: "minimize", title: tClient("window.minimize", locale) }),
+							React.createElement(MiniWindowBtn, { kind: "toggleMaximize", title: tClient("window.maximize", locale) }),
+							React.createElement(MiniWindowBtn, { kind: "close", title: tClient("window.close", locale) }))
 						: null
 				),
 				document.body
@@ -584,6 +824,7 @@ window.__ModuleLoader__.load({
 		// with a quieter style — the core update always wins when both exist.
 		function UpdateBadge(props) {
 			const state = useUpdateState();
+			const locale = useLocale();
 			const [confirming, setConfirming] = React.useState(false);
 			const confirmTimer = React.useRef(0);
 			React.useEffect(() => () => clearTimeout(confirmTimer.current), []);
@@ -608,14 +849,19 @@ window.__ModuleLoader__.load({
 					size: "sm",
 					className: "dsh-desktop-update-badge is-shell" + (confirming ? " is-confirm" : ""),
 					title: confirming
-						? "再次点击下载并安装（误触保护）"
-						: `鲸港新版本 ${state.shellLatestVersion || ""}（当前 ${state.shellVersion || ""}），点击两次下载安装`,
+						? tClient("shell.updateBadge.confirm.title", locale)
+						: tClient("shell.updateBadge.title", locale, {
+								latest: state.shellLatestVersion || "",
+								current: state.shellVersion || ""
+							}),
 					onClick: () => {
 						if (!confirming) { armConfirm(); return; }
 						disarm();
 						if (hasBridge("downloadShellUpdate")) bridge().downloadShellUpdate().catch(() => {});
 					}
-				}, confirming ? `再次点击装 ${state.shellLatestVersion || ""}` : `鲸港新版 ${state.shellLatestVersion || ""}`);
+				}, confirming
+					? tClient("shell.updateBadge.confirm.label", locale, { latest: state.shellLatestVersion || "" })
+					: tClient("shell.updateBadge.label", locale, { latest: state.shellLatestVersion || "" }));
 			}
 
 			if (!state.updateAvailable) return null;
@@ -624,14 +870,19 @@ window.__ModuleLoader__.load({
 				size: "sm",
 				className: "dsh-desktop-update-badge" + (confirming ? " is-confirm" : ""),
 				title: confirming
-					? "再次点击确认安装（误触保护，会先停止核心）"
-					: `发现新版本 ${state.latest}（当前 ${state.installed}），点击更新`,
+					? tClient("core.updateBadge.confirm.title", locale)
+					: tClient("core.updateBadge.title", locale, {
+							latest: state.latest || "",
+							installed: state.installed || ""
+						}),
 				onClick: () => {
 					if (!confirming) { armConfirm(); return; }
 					disarm();
 					if (hasBridge("installUpdate")) bridge().installUpdate();
 				}
-			}, confirming ? "再次点击确认安装" : `有新版 ${state.latest || ""}`);
+			}, confirming
+				? tClient("core.updateBadge.confirm.label", locale)
+				: tClient("core.updateBadge.label", locale, { latest: state.latest || "" }));
 		}
 
 		// ---- 3. settings sections ----------------------------------------------
@@ -666,20 +917,22 @@ window.__ModuleLoader__.load({
 				React.createElement("span", { className: "dsh-desktop-header-title" }, props.title));
 		}
 
-		function NoShell() {
+		function NoShell(props) {
+			const locale = (props && props.locale) || DEFAULT_LOCALE;
 			return React.createElement("div", { className: "dsh-desktop-settings" },
-				"（在浏览器中运行，未检测到桌面外壳）");
+				tClient("settings.noBridge", locale));
 		}
 
 		/** label + toggle switch row — the settings sections' repeated shape.
 		 *  onToggle is the caller's flip handler (owns state + toast); the
-		 *  checkbox merely reports the click. */
+		 *  checkbox merely reports the click. The "on/off" status label is
+		 *  resolved by the caller via tClient so the row stays locale-agnostic. */
 		function ToggleRow(props) {
 			return React.createElement("div", { className: "dsh-desktop-row" },
 				React.createElement("span", { className: "dsh-desktop-label" }, props.label),
 				React.createElement("label", { className: "dsh-desktop-toggle" },
 					React.createElement("input", { type: "checkbox", checked: props.checked, onChange: props.onToggle }),
-					React.createElement("span", null, props.checked ? "已开启" : "已关闭")));
+					React.createElement("span", null, props.statusLabel)));
 		}
 
 		/** 核心: core version + update channel + update check + auto-update toggle
@@ -687,46 +940,52 @@ window.__ModuleLoader__.load({
 		 *  Ctrl/⌘ Alt/⌥ R restart core) — on Windows the app menu is invisible,
 		 *  so the settings page is where users learn those keys exist. */
 		const CORE_CHANNELS = [
-			{ value: "latest", label: "稳定版（latest）" },
-			{ value: "next", label: "体验版（next）" },
-			{ value: "alpha", label: "实验版（alpha）" }
+			{ value: "latest", labelKey: "core.channel.latest" },
+			{ value: "next", labelKey: "core.channel.next" },
+			{ value: "alpha", labelKey: "core.channel.alpha" }
 		];
-		const CHANNEL_LABEL = { latest: "稳定版", next: "体验版", alpha: "实验版" };
+		const CHANNEL_LABEL_KEY = { latest: "core.channel.label.latest", next: "core.channel.label.next", alpha: "core.channel.label.alpha" };
 		// Shell shortcuts, spelled per platform: macOS shows them in its always
 		// visible menu bar; Windows' frameless window hides the menu entirely.
-		const SHORTCUT_HINT = /Mac/i.test(typeof navigator !== "undefined" && (navigator.userAgent || ""))
-			? "快捷键：⌘ R 刷新页面；⌘ ⌥ R 重启核心"
-			: "快捷键：Ctrl+R 刷新页面；Ctrl+Alt+R 重启核心";
+		const SHORTCUT_HINT_KEY = /Mac/i.test(typeof navigator !== "undefined" && (navigator.userAgent || ""))
+			? "core.shortcut.mac"
+			: "core.shortcut.win";
 		function CoreSection() {
 			const state = useUpdateState();
+			const locale = useLocale();
 			const [checking, setChecking] = React.useState(false);
 			const [installing, setInstalling] = React.useState(false);
 			const [restarting, setRestarting] = React.useState(false);
 			const [toast, setToast] = React.useState(null);
-			if (!hasBridge("getUpdateState")) return React.createElement(NoShell);
+			if (!hasBridge("getUpdateState")) return React.createElement(NoShell, { locale });
 			const installed = state ? state.installed : null;
 			const latest = state ? state.latest : null;
 			const autoUpdate = state ? !!state.autoUpdate : false;
-			const coreChannel = state && CHANNEL_LABEL[state.coreChannel] ? state.coreChannel : "latest";
+			const coreChannel = state && CHANNEL_LABEL_KEY[state.coreChannel] ? state.coreChannel : "latest";
 			const updateAvailable = state ? !!state.updateAvailable : false;
 
 			const showToast = (text) => setToast({ text });
 			const setChannel = (value) => {
 				if (value === coreChannel) return;
 				bridge().setCoreChannel(value);
-				showToast(`更新渠道已切换为「${CHANNEL_LABEL[value] || value}」，检查更新将按 npm 的 ${value} 标签进行`);
+				showToast(tClient("core.channelChanged", locale, {
+					channel: tClient(CHANNEL_LABEL_KEY[value] || "core.channel.label.latest", locale),
+					tag: value
+				}));
 			};
 			const doCheck = () => {
 				setChecking(true);
 				bridge().checkUpdate()
-					.then((s) => showToast(s && s.updateAvailable ? `发现新版本 ${s.latest}` : "已是最新版本"))
-					.catch(() => showToast("检查失败，请检查网络"))
+					.then((s) => showToast(s && s.updateAvailable
+						? tClient("core.updateBadge.label", locale, { latest: s.latest || "" })
+						: tClient("core.upToDate", locale)))
+					.catch(() => showToast(tClient("core.checkFailed", locale)))
 					.finally(() => setChecking(false));
 			};
 			const doInstall = () => {
 				setInstalling(true);
 				bridge().installUpdate()
-					.catch(() => showToast("更新失败"))
+					.catch(() => showToast(tClient("core.installFailed", locale)))
 					.finally(() => setInstalling(false));
 			};
 			const toggleAuto = () => { bridge().setAutoUpdate(!autoUpdate); };
@@ -738,15 +997,15 @@ window.__ModuleLoader__.load({
 				setRestarting(true);
 				Promise.resolve(bridge().restartCore())
 					.then((started) => {
-						if (started) showToast("正在重启核心…");
+						if (started) showToast(tClient("core.restart.started", locale));
 						else {
 							setRestarting(false);
-							showToast("核心正在更新或已在重启中，请稍后再试");
+							showToast(tClient("core.restart.busy", locale));
 						}
 					})
 					.catch(() => {
 						setRestarting(false);
-						showToast("重启失败，请重试");
+						showToast(tClient("core.restart.failed", locale));
 					});
 			};
 
@@ -754,65 +1013,68 @@ window.__ModuleLoader__.load({
 				"div",
 				{ className: "dsh-desktop-settings" },
 				toast ? React.createElement(Toast, { text: toast.text, onDone: () => setToast(null) }) : null,
-				React.createElement(SectionHeader, { icon: React.createElement(IconCore), title: "核心" }),
+				React.createElement(SectionHeader, { icon: React.createElement(IconCore), title: tClient("settings.section.core", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "核心版本"),
-					React.createElement("span", { className: "dsh-desktop-value" }, installed ?? "未知"),
+					React.createElement("span", { className: "dsh-desktop-label" }, tClient("core.version", locale)),
+					React.createElement("span", { className: "dsh-desktop-value" }, installed ?? tClient("core.version.unknown", locale)),
 					updateAvailable
-						? React.createElement("span", { className: "dsh-desktop-new" }, `最新 ${latest}`)
+						? React.createElement("span", { className: "dsh-desktop-new" }, tClient("core.latest", locale, { version: latest || "" }))
 						: null),
 				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "更新渠道"),
+					React.createElement("span", { className: "dsh-desktop-label" }, tClient("core.channel", locale)),
 					React.createElement("select", {
 						className: "dsh-desktop-select",
 						value: coreChannel,
 						onChange: (e) => setChannel(e.target.value)
 					},
 					CORE_CHANNELS.map((o) =>
-						React.createElement("option", { key: o.value, value: o.value }, o.label))),
+						React.createElement("option", { key: o.value, value: o.value }, tClient(o.labelKey, locale)))),
 					React.createElement("span", { className: "dsh-desktop-hint" },
-						`按 npm 的 ${coreChannel} 标签检查/安装更新`)),
-				ToggleRow({ label: "自动更新", checked: autoUpdate, onToggle: toggleAuto }),
+						tClient("core.channel.hint", locale, { channel: coreChannel }))),
+				ToggleRow({ label: tClient("core.autoUpdate", locale), checked: autoUpdate, onToggle: toggleAuto, statusLabel: tClient(autoUpdate ? "desktop.toggle.on" : "desktop.toggle.off", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-actions" },
 					React.createElement(Button, {
 						variant: "outline", size: "sm", disabled: checking, onClick: doCheck
-					}, checking ? "检查中…" : "检查更新"),
+					}, checking ? tClient("core.checking", locale) : tClient("core.check", locale)),
 					updateAvailable
 						? React.createElement(Button, {
 							variant: "solid", size: "sm", disabled: installing, onClick: doInstall
-						}, installing ? "更新中…" : `更新到 ${latest}`)
+						}, installing ? tClient("core.installing", locale) : tClient("core.install", locale, { version: latest || "" }))
 						: null),
 				hasBridge("restartCore")
 					? React.createElement("div", { className: "dsh-desktop-row" },
-						React.createElement("span", { className: "dsh-desktop-label" }, "重启核心"),
+						React.createElement("span", { className: "dsh-desktop-label" }, tClient("core.restart", locale)),
 						React.createElement(Button, {
 							variant: "outline", size: "sm", disabled: restarting, onClick: doRestart
-						}, restarting ? "重启中…" : "重启核心"))
+						}, restarting ? tClient("core.restarting", locale) : tClient("core.restart", locale)))
 					: null,
 				hasBridge("restartCore")
 					? React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-						"停止并重新拉起 DSH 核心进程（窗口会短暂回到启动页）；更新渠道等改动借此生效。")
+						tClient("core.restart.hint", locale))
 					: null,
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					SHORTCUT_HINT)
+					tClient(SHORTCUT_HINT_KEY, locale))
 			);
 		}
 
 		/** 桌面版: shell behaviour — 壳版本/更新 + 常驻通知栏 / 阻止休眠 / 任务通知. */
 		function DesktopSection() {
 			const state = useUpdateState();
+			const locale = useLocale();
+			const power = usePowerPlan();
 			const [toast, setToast] = React.useState(null);
 			const [shellChecking, setShellChecking] = React.useState(false);
 			const [shellInfo, setShellInfo] = React.useState(null); // { shellHasUpdate, shellLatest, shellAssetName }
 			const [downloading, setDownloading] = React.useState(false);
 			const [dlProgress, setDlProgress] = React.useState(null);
-			if (!hasBridge("getUpdateState")) return React.createElement(NoShell);
+			if (!hasBridge("getUpdateState")) return React.createElement(NoShell, { locale });
 			const closeToTray = state ? !!state.closeToTray : false;
 			const preventSleep = state ? !!state.preventSleep : false;
 			const taskNotify = state ? !!state.taskNotify : false;
 			const inheritTerminalProfile = state ? state.inheritTerminalProfile !== false : true;
 			const allowFloatWindows = state ? state.allowFloatWindows !== false : true;
 			const bundleMarket = state ? state.bundleMarket !== false : true;
+			const powerSaveMode = power.mode;
 
 			// Shell self-update progress pushes from the main process.
 			React.useEffect(() => {
@@ -822,7 +1084,7 @@ window.__ModuleLoader__.load({
 					if (p.error) {
 						setDlProgress(null);
 						setDownloading(false);
-						setToast({ text: "下载失败：" + p.error });
+						setToast({ text: tClient("desktop.shellDownloadFailed.prefix", locale, { error: p.error }) });
 					} else {
 						setDlProgress(p);
 					}
@@ -836,9 +1098,9 @@ window.__ModuleLoader__.load({
 					.then((r) => {
 						setShellInfo(r);
 						if (r && r.error) setToast({ text: r.error });
-						else if (r && !r.shellHasUpdate) setToast({ text: "壳已是最新版本 " + (r.shellLatest || "") });
+						else if (r && !r.shellHasUpdate) setToast({ text: tClient("desktop.shellUpToDate", locale, { version: r.shellLatest || "" }) });
 					})
-					.catch(() => setToast({ text: "检查失败" }))
+					.catch(() => setToast({ text: tClient("desktop.shellCheckFailed", locale) }))
 					.finally(() => setShellChecking(false));
 			};
 			const doShellDownload = () => {
@@ -846,84 +1108,120 @@ window.__ModuleLoader__.load({
 				setDlProgress({ percent: 0 });
 				bridge().downloadShellUpdate()
 					.then((r) => {
-						if (r && r.ok) setToast({ text: "更新包已下载，正在启动安装程序…" });
-						else setToast({ text: (r && r.error) || "下载失败" });
+						if (r && r.ok) setToast({ text: tClient("desktop.shellDownloaded", locale) });
+						else setToast({ text: (r && r.error) || tClient("desktop.shellDownloadFailed", locale) });
 					})
-					.catch(() => setToast({ text: "下载失败" }))
+					.catch(() => setToast({ text: tClient("desktop.shellDownloadFailed", locale) }))
 					.finally(() => setDownloading(false));
 			};
 			const toggleTray = () => {
 				bridge().setCloseToTray(!closeToTray);
-				setToast({ text: !closeToTray ? "已开启：关闭窗口将最小化到通知栏" : "已关闭：关闭窗口即退出" });
+				setToast({ text: tClient(!closeToTray ? "desktop.closeToTray.enabled" : "desktop.closeToTray.disabled", locale) });
 			};
 			const toggleSleep = () => {
 				bridge().setPreventSleep(!preventSleep);
-				setToast({ text: !preventSleep ? "已开启：任务运行期间阻止系统休眠" : "已关闭：允许系统正常休眠" });
+				setToast({ text: tClient(!preventSleep ? "desktop.preventSleep.enabled" : "desktop.preventSleep.disabled", locale) });
 			};
 			const toggleNotify = () => {
 				bridge().setTaskNotify(!taskNotify);
-				setToast({ text: !taskNotify ? "已开启：主任务完成、失败或需确认时发送桌面通知" : "已关闭：不再发送任务通知" });
+				setToast({ text: tClient(!taskNotify ? "desktop.taskNotify.enabled" : "desktop.taskNotify.disabled", locale) });
 			};
 			const toggleFloat = () => {
 				bridge().setAllowFloatWindows(!allowFloatWindows);
-				setToast({ text: !allowFloatWindows ? "已开启：插件可创建桌面浮窗（如桌面宠物）" : "已关闭：插件浮窗已全部关闭" });
+				setToast({ text: tClient(!allowFloatWindows ? "desktop.allowFloatWindows.enabled" : "desktop.allowFloatWindows.disabled", locale) });
 			};
 			const toggleTerminalProfile = () => {
 				bridge().setInheritTerminalProfile(!inheritTerminalProfile);
-				setToast({ text: !inheritTerminalProfile ? "已开启：将继承终端 Profile（需重启 DSH 生效）" : "已关闭：不再继承终端 Profile（需重启 DSH 生效）" });
+				setToast({ text: tClient(!inheritTerminalProfile ? "desktop.inheritTerminalProfile.enabled" : "desktop.inheritTerminalProfile.disabled", locale) });
 			};
 			const toggleMarket = () => {
 				bridge().setBundleMarket(!bundleMarket);
-				setToast({ text: !bundleMarket ? "已开启：下次启动 DSH 时挂载内置插件市场" : "已关闭：下次启动 DSH 起不再挂载内置插件市场" });
+				setToast({ text: tClient(!bundleMarket ? "desktop.bundleMarket.enabled" : "desktop.bundleMarket.disabled", locale) });
+			};
+			const setPowerMode = (mode) => {
+				bridge().setPowerSaveMode(mode);
 			};
 
-			const shellVersion = (state && state.shellVersion) || "未知";
+			const shellVersion = (state && state.shellVersion) || tClient("core.version.unknown", locale);
 			const shellUpdateAvailable = !!(shellInfo && shellInfo.shellHasUpdate);
+			// "currently: ..." hint — only shown when the effective plan differs
+			// from the user-selected mode (auto + on-battery threshold, etc.).
+			// Unknown battery level (manual mode / no battery report yet) degrades
+			// to the SHORT label instead of a "?%" placeholder artifact.
+			const planState = power.plan;
+			const planStateText = planState && planState.mode === "lowpower"
+				? (typeof planState.level === "number"
+					? tClient("power.lowpower.label", locale, { level: String(planState.level) })
+					: tClient("power.lowpower.short", locale))
+				: tClient("power.normal.label", locale);
 
 			return React.createElement(
 				"div",
 				{ className: "dsh-desktop-settings" },
 				toast ? React.createElement(Toast, { text: toast.text, onDone: () => setToast(null) }) : null,
-				React.createElement(SectionHeader, { icon: React.createElement(IconDesktop), title: "桌面版" }),
+				React.createElement(SectionHeader, { icon: React.createElement(IconDesktop), title: tClient("settings.section.desktop", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row" },
-					React.createElement("span", { className: "dsh-desktop-label" }, "壳版本"),
+					React.createElement("span", { className: "dsh-desktop-label" }, tClient("desktop.shellVersion", locale)),
 					React.createElement("span", { className: "dsh-desktop-value" }, shellVersion),
 					React.createElement(Button, {
 						variant: "outline", size: "sm", disabled: shellChecking || downloading,
 						onClick: doShellCheck
-					}, shellChecking ? "检查中…" : "检查更新")),
+					}, shellChecking ? tClient("desktop.shellChecking", locale) : tClient("desktop.shellCheck", locale))),
 				shellUpdateAvailable
 					? React.createElement("div", { className: "dsh-desktop-row dsh-desktop-actions" },
 						React.createElement(Button, {
 							variant: "solid", size: "sm", disabled: downloading, onClick: doShellDownload
 						}, downloading
-							? (dlProgress && dlProgress.percent != null ? "下载中 " + dlProgress.percent + "%" : "下载中…")
-							: "下载 " + (shellInfo.shellLatest || "") + " 安装包"),
+							? (dlProgress && dlProgress.percent != null
+								? tClient("desktop.shellDownloading", locale, { percent: dlProgress.percent })
+								: tClient("desktop.shellDownloading.undef", locale))
+							: tClient("desktop.shellDownload", locale, { version: shellInfo.shellLatest || "" })),
 						React.createElement("span", { className: "dsh-desktop-new" },
-							"发现新版本 " + (shellInfo.shellLatest || "")))
+							tClient("desktop.shellNewVersion", locale, { version: shellInfo.shellLatest || "" })))
 					: null,
 				dlProgress && dlProgress.percent != null && !shellUpdateAvailable
 					? React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-						"正在下载更新包：" + dlProgress.percent + "%（" +
-						(Number(dlProgress.downloadedMB) || 0).toFixed(1) + " / " +
-						(Number(dlProgress.totalMB) || 0).toFixed(0) + " MB）")
+						tClient("desktop.shellProgress.hint", locale, {
+							percent: dlProgress.percent,
+							downloaded: (Number(dlProgress.downloadedMB) || 0).toFixed(1),
+							total: (Number(dlProgress.totalMB) || 0).toFixed(0)
+						}))
 					: null,
-				ToggleRow({ label: "常驻通知栏", checked: closeToTray, onToggle: toggleTray }),
+				ToggleRow({ label: tClient("desktop.closeToTray", locale), checked: closeToTray, onToggle: toggleTray, statusLabel: tClient(closeToTray ? "desktop.toggle.on" : "desktop.toggle.off", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					"开启后：点关闭按钮不退出，最小化到通知栏；通知栏图标右键可「打开鲸港」或「退出」。"),
-				ToggleRow({ label: "阻止休眠", checked: preventSleep, onToggle: toggleSleep }),
-				ToggleRow({ label: "任务通知", checked: taskNotify, onToggle: toggleNotify }),
-				ToggleRow({ label: "继承终端 Profile", checked: inheritTerminalProfile, onToggle: toggleTerminalProfile }),
+					tClient("desktop.closeToTray.hint", locale)),
+				ToggleRow({ label: tClient("desktop.preventSleep", locale), checked: preventSleep, onToggle: toggleSleep }),
+				ToggleRow({ label: tClient("desktop.taskNotify", locale), checked: taskNotify, onToggle: toggleNotify, statusLabel: tClient(taskNotify ? "desktop.toggle.on" : "desktop.toggle.off", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					"继承终端 Profile：自动加载终端里的环境变量（PATH 等）传给 DSH，MCP 服务等外部进程能正常找到可执行文件；macOS 从 Finder 启动时没有终端环境变量，建议保持开启（改动需重启 DSH 生效）。"),
-				ToggleRow({ label: "插件市场", checked: bundleMarket, onToggle: toggleMarket }),
+					tClient("desktop.taskNotify.hint", locale)),
+				ToggleRow({ label: tClient("desktop.inheritTerminalProfile", locale), checked: inheritTerminalProfile, onToggle: toggleTerminalProfile, statusLabel: tClient(inheritTerminalProfile ? "desktop.toggle.on" : "desktop.toggle.off", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					"内置插件市场（dshmarket）：随壳自带、免下载安装，可浏览/搜索/一键安装社区插件。若你已在 DSH profile 中自行安装过插件市场，以你的安装为准（不会重复挂载）；改动需重启 DSH 生效。"),
+					tClient("desktop.inheritTerminalProfile.hint", locale)),
+				ToggleRow({ label: tClient("desktop.bundleMarket", locale), checked: bundleMarket, onToggle: toggleMarket, statusLabel: tClient(bundleMarket ? "desktop.toggle.on" : "desktop.toggle.off", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					"任务通知：主任务完成、失败或需要确认时发送桌面通知（子任务完成不打扰）。"),
-				ToggleRow({ label: "允许插件浮窗", checked: allowFloatWindows, onToggle: toggleFloat }),
+					tClient("desktop.bundleMarket.hint", locale)),
+				ToggleRow({ label: tClient("desktop.allowFloatWindows", locale), checked: allowFloatWindows, onToggle: toggleFloat, statusLabel: tClient(allowFloatWindows ? "desktop.toggle.on" : "desktop.toggle.off", locale) }),
 				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
-					"允许插件创建桌面悬浮窗口（如随任务状态变化的桌面宠物）。关闭后现有浮窗立即消失，插件也无法再创建。")
+					tClient("desktop.allowFloatWindows.hint", locale)),
+				// Power plan: tri-state select rather than a toggle (the three
+				// modes are not boolean — see AGENTS §16). The "currently:" hint
+				// shows the EFFECTIVE plan, not the user-selected mode, so the
+				// user understands why the plan might already be lowpower when
+				// they have it on "auto".
+				React.createElement("div", { className: "dsh-desktop-row" },
+					React.createElement("span", { className: "dsh-desktop-label" }, tClient("desktop.powerSaveMode", locale)),
+					React.createElement("select", {
+						className: "dsh-desktop-select",
+						value: powerSaveMode,
+						onChange: (e) => setPowerMode(e.target.value)
+					},
+						React.createElement("option", { value: "auto" }, tClient("desktop.powerSaveMode.auto", locale)),
+						React.createElement("option", { value: "lowpower" }, tClient("desktop.powerSaveMode.lowpower", locale)),
+						React.createElement("option", { value: "off" }, tClient("desktop.powerSaveMode.off", locale)))),
+				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
+					tClient("desktop.powerSaveMode.hint", locale)),
+				React.createElement("div", { className: "dsh-desktop-row dsh-desktop-hint" },
+					tClient("desktop.powerSaveMode.active.hint", locale, { state: planStateText }))
 			);
 		}
 
@@ -1147,23 +1445,59 @@ window.__ModuleLoader__.load({
 [data-dsh-desktop-shell-settings-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='14' rx='2'/%3E%3Cpath d='M8 21h8'/%3E%3Cpath d='M12 17v4'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='14' rx='2'/%3E%3Cpath d='M8 21h8'/%3E%3Cpath d='M12 17v4'/%3E%3C/svg%3E") center/contain no-repeat}
 `;
 
-		const SETTINGS_CORE_LABEL = "核心";
-		const SETTINGS_SHELL_LABEL = "桌面版";
+		const SETTINGS_CORE_LABEL_KEY = "settings.section.core";
+		const SETTINGS_SHELL_LABEL_KEY = "settings.section.desktop";
+		/** Synchronous initial-locale read used at slot registration time —
+		 *  the DSH settings UI caches the label we pass and never re-reads it,
+		 *  so it must match the locale the user actually sees. Order matters:
+		 *  ① the bridge's getThemeSync() is a sendSync IPC that carries
+		 *  `locale` — authoritative and available RIGHT NOW (the async
+		 *  getUpdateState push has not arrived when slots register);
+		 *  ② <html lang>, which a previous page (splash) may have set — but a
+		 *  fresh DSH document starts without it, so it is only a fallback;
+		 *  ③ the default locale. */
+		function resolveInitialLocale() {
+			try {
+				const b = bridge();
+				if (b && typeof b.getThemeSync === "function") {
+					const t = b.getThemeSync();
+					if (t && (t.locale === "zh-CN" || t.locale === "en-US")) return t.locale;
+				}
+			} catch (e) { /* sync IPC unavailable → fall through */ }
+			try {
+				const lang = (document.documentElement && document.documentElement.getAttribute("lang")) || "";
+				if (lang === "zh-CN" || lang === "en-US") return lang;
+			} catch (e) { /* noop */ }
+			return DEFAULT_LOCALE;
+		}
 		/* Settings nav icons: DSH 0.1.x does not yet carry an icon through the
 		   settings.section registration contract — the shell projects only
 		   id/order/label and paints a generic gear for every external section.
 		   Mark only this plugin's nav rows (核心 / 桌面版) so the CSS above can
 		   replace the fallback gears; the disposer clears the markers for
-		   plugin disable / HMR reload. */
-		const SETTINGS_NAV_ENTRIES = [
-			{ label: SETTINGS_CORE_LABEL, marker: "data-dsh-desktop-core-settings-nav" },
-			{ label: SETTINGS_SHELL_LABEL, marker: "data-dsh-desktop-shell-settings-nav" }
+		   plugin disable / HMR reload. Entries are template-shaped: the
+		   resolved label is computed against the CURRENT locale each sync,
+		   so the row marker follows the language the user actually sees. */
+		const SETTINGS_NAV_TEMPLATE = [
+			{ labelKey: SETTINGS_CORE_LABEL_KEY, marker: "data-dsh-desktop-core-settings-nav" },
+			{ labelKey: SETTINGS_SHELL_LABEL_KEY, marker: "data-dsh-desktop-shell-settings-nav" }
 		];
 
 		function registerSettingsNavIcons(entries) {
 			let disposed = false;
+			// Re-read the locale each sync from <html lang> (the splash and
+			// every other renderer sets it on locale change). One source of
+			// truth, no extra pubsub — when the locale flips, the next sync
+			// tick drops stale markers and re-matches against the new labels.
+			function currentLocale() {
+				const html = document.documentElement;
+				const lang = (html && html.getAttribute && html.getAttribute("lang")) || "";
+				if (lang === "zh-CN" || lang === "en-US") return lang;
+				return DEFAULT_LOCALE;
+			}
 			const sync = function () {
 				if (disposed) return;
+				const locale = currentLocale();
 				// Early exit: the settings dialog is closed almost all of the time,
 				// but this observer used to run a full-document selector sweep on
 				// EVERY body mutation — characterData included, i.e. dozens of
@@ -1171,16 +1505,26 @@ window.__ModuleLoader__.load({
 				const nav = document.querySelector('[role="dialog"] nav');
 				if (!nav) return;
 				const buttons = document.querySelectorAll('[role="dialog"] nav button');
+				// Resolve labels for THIS locale (cheap — the dictionary is in
+				// memory; the lookup is two object-property reads).
+				const labels = entries.map((e) => tClient(e.labelKey, locale));
 				for (let i = 0; i < buttons.length; i++) {
 					const button = buttons[i];
 					const text = button.textContent ? button.textContent.trim() : "";
 					for (let j = 0; j < entries.length; j++) {
 						const entry = entries[j];
-						if (entry.label.length > 0 && text === entry.label) {
+						const label = labels[j];
+						if (label.length > 0 && text === label) {
 							// Skip redundant writes — each setAttribute re-triggers
 							// layout and (attribute-observing) observers downstream.
 							if (!button.hasAttribute(entry.marker)) button.setAttribute(entry.marker, "");
 						} else if (button.hasAttribute(entry.marker)) {
+							// Unconditional removal (original semantics): the marker
+							// is a derived cache of "this row's text === our label".
+							// Also covers a locale flip — the DSH nav keeps the
+							// registration-time label, so after a switch the text no
+							// longer matches the new-locale label and the stale icon
+							// must go (it returns only if the text matches again).
 							button.removeAttribute(entry.marker);
 						}
 					}
@@ -1220,7 +1564,7 @@ window.__ModuleLoader__.load({
 			});
 			// Mark our settings-nav rows (核心 / 桌面版) so the CSS above
 			// replaces the shell's fallback gear for both sections.
-			if (typeof ctx.effect === "function") ctx.effect(() => registerSettingsNavIcons(SETTINGS_NAV_ENTRIES));
+			if (typeof ctx.effect === "function") ctx.effect(() => registerSettingsNavIcons(SETTINGS_NAV_TEMPLATE));
 
 			// Window-button mode store: created BEFORE any slot registration so
 			// WindowControls can subscribe on first render. Signals: the shell
@@ -1258,8 +1602,42 @@ window.__ModuleLoader__.load({
 					.then((s) => {
 						if (!(s && typeof s.installed === "string")) return;
 						if (placementStore.setVersion(s.installed) !== null) detachDomFallback();
+						// Mirror the locale on <html lang> so the settings-nav
+						// matcher (registerSettingsNavIcons above) and any
+						// other consumer that reads documentElement.lang see
+						// the same value the main process sent.
+						if (s && (s.locale === "zh-CN" || s.locale === "en-US") &&
+								document.documentElement &&
+								document.documentElement.getAttribute("lang") !== s.locale) {
+							document.documentElement.setAttribute("lang", s.locale);
+						}
 					})
 					.catch(() => { /* keep the DOM fallback */ });
+			}
+
+			// Battery report stream (AGENTS §6d): this is the LONG-LIVED page —
+			// the splash reports once at boot, this page keeps the shell's power
+			// plan current across charging/level changes for the whole session.
+			// The splash also wires listeners, but they die with that page; both
+			// reporting is harmless (same values, idempotent main-process cache).
+			if (isDesktop && typeof bridge().reportBatteryState === "function" &&
+					typeof navigator !== "undefined" && navigator.getBattery) {
+				try {
+					navigator.getBattery().then((bat) => {
+						if (!bat) return;
+						const report = () => {
+							try {
+								bridge().reportBatteryState({
+									onBattery: bat.charging === false,
+									levelPercent: typeof bat.level === "number" ? Math.round(bat.level * 100) : null
+								});
+							} catch (e) { /* bridge hiccup — skip this tick */ }
+						};
+						report();
+						bat.addEventListener("chargingchange", report);
+						bat.addEventListener("levelchange", report);
+					}).catch(() => { /* no battery API on this platform → normal mode */ });
+				} catch (e) { /* ditto */ }
 			}
 
 			ctx.slots.inject("shell.overlay", () => ctx.slots.register(
@@ -1267,21 +1645,21 @@ window.__ModuleLoader__.load({
 					name: "shell.overlay",
 					id: "dsh-desktop-controls",
 					order: 1000,
-					label: "窗口控制",
+					label: tClient("windowControls.aria", resolveInitialLocale()),
 					inject: () => ({ sessions: ctx.sessions })
 				},
 				WindowControls
 			));
 			ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register(
-				{ name: "sidebar.footer.action", id: "dsh-desktop-update", order: 1000, label: "检查更新" },
+				{ name: "sidebar.footer.action", id: "dsh-desktop-update", order: 1000, label: tClient("core.check", resolveInitialLocale()) },
 				UpdateBadge
 			));
 			ctx.slots.inject("settings.section", () => ctx.slots.register(
-				{ name: "settings.section", id: "dsh-desktop-core", order: 100, label: SETTINGS_CORE_LABEL },
+				{ name: "settings.section", id: "dsh-desktop-core", order: 100, label: tClient(SETTINGS_CORE_LABEL_KEY, resolveInitialLocale()) },
 				CoreSection
 			));
 			ctx.slots.inject("settings.section", () => ctx.slots.register(
-				{ name: "settings.section", id: "dsh-desktop-shell", order: 101, label: SETTINGS_SHELL_LABEL },
+				{ name: "settings.section", id: "dsh-desktop-shell", order: 101, label: tClient(SETTINGS_SHELL_LABEL_KEY, resolveInitialLocale()) },
 				DesktopSection
 			));
 		}

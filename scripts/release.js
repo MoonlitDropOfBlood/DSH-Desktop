@@ -69,7 +69,10 @@ for (const line of section.replace(/\r/g, "").split("\n")) {
   const m = line.match(/^- \*\*([^*]+)\*\*[：:]\s*(.+)$/);
   if (m) bullets.push({ title: m[1].trim(), desc: m[2].trim() });
 }
-const clean = (s) => s.replace(/`/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Escape for embedding in the single-quoted JS dict strings inside
+// docs/index.html: HTML entities for markup, typographic apostrophe instead
+// of a literal ' (a bare one would terminate the JS string).
+const clean = (s) => s.replace(/`/g, "").replace(/'/g, "\u2019").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const items = bullets.slice(0, 4).map((b) => {
   let desc = clean(b.desc);
   if (desc.length > 88) desc = desc.slice(0, 88).replace(/\s+\S*$/, "") + "…";
@@ -85,8 +88,10 @@ let docs = fs.readFileSync(docsPath, "utf8");
 const docsBefore = docs;
 docs = docs.replace(/var latestVer = 'v[^']*';/, "var latestVer = 'v" + version + "';");
 if (!docs.includes("var latestVer = 'v" + version + "';")) fail("docs/index.html: latestVer not found/updated");
-// Replace BOTH rel.fallback dict entries (zh + en dicts).
-const fallbackRe = /'rel\.fallback': '<h4>v[^<]*<\/h4>[\s\S]*?<\/ul>',/g;
+// Replace BOTH rel.fallback dict entries (zh + en dicts). Match the WHOLE
+// single-quoted string — the v1.9.4-era en entry carries a trailing <p> note
+// after </ul>, so anchoring on </ul>' would miss it.
+const fallbackRe = /'rel\.fallback': '[^']*',/g;
 let fallbackCount = 0;
 docs = docs.replace(fallbackRe, () => {
   fallbackCount++;
