@@ -8,8 +8,15 @@
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-18
+
+### 变更
+
+- **核心启动链提速（spawn 前 shell 侧开销 ~54ms，此前实测 184–796ms）**：① `dshRuntime()` 不再为选运行时**同步 spawn `node.exe --version`**——改为读 fetch-node.js 早就写在二进制旁的 `.version` 标记（缺失/解析失败才回退 execFileSync 探测），并把解析结果进程级记忆化（内置 node 只随壳更新变化、override env 启动即固定）；② 重启链杀核后的首次端口复查**立即执行**（killDSH 已等死透 + settle 窗，原来的盲等 400ms 前摇是纯延迟）；③ `killDSH` 的 400ms settle 从 `syncSleep` 改为异步定时器——原实现每次重启/退出都把主线程硬冻结 400ms（窗口拖动/托盘/启动页全卡）。新增启动耗时日志 `core ready in N ms (spawn → URL)`，以后启动变慢可直接从日志归因（壳准备 vs 核心自身启动）。真机验证（隔离环境 + E2E_RESTARTS 钩子）：冷启动 spawn 后 4377ms 就绪，完整重启链 4.76s。
+
 ### 修复
 
+- **`log()` 的 stdout EPIPE 崩溃风暴**：stdout 是管道且读取方先退出时（dev 管道、CI 采集器、后台任务托管），EPIPE 从流上**异步**抛出 → uncaughtException → 处理器自己又 `console.log` → 再抛 EPIPE → 无限递归，实测日志以 ~30MB/s 膨胀。修复：进程启动时给 `process.stdout/stderr` 挂空 `error` 监听吞掉流级错误 + `console.log` 本体包 try/catch（同步抛的边角）；文件日志是唯一权威落点，console 损失永远不许拖垮主进程。
 - **build-installers 发布 job 的 401 Bad credentials（v1.10.0 发布事故）**：`release` job 的三个 gh CLI 步骤用 `secrets.GH_TOKEN`（个人 PAT）调 GitHub API——该 secret 未配置/失效时 gh 直接报 `401 Unauthorized: Bad credentials`，Release 发不出去（4 个构建 job 全部成功、产物已上传，唯独最后一步发布失败）。工作流顶部本就有 `permissions: contents: write`，内置 `GITHUB_TOKEN` 的权限完全覆盖「创建/编辑 Release + 上传资产」，改为 `secrets.GITHUB_TOKEN` 后不再依赖任何仓库 secret，这类失败从根上消失。`release-whaleharbor-promo.yml` 此前已用 `GH_TOKEN || GITHUB_TOKEN` 兜底，本次对齐。
 - **build-installers 资产校验的空间→点号误判（v1.10.0 发布事故续）**：GitHub 上传资产时把文件名空格规范成点号（`DeepSeek Harness Desktop Setup 1.10.0.exe` → `DeepSeek.Harness.Desktop.Setup.1.10.0.exe`），verify 步骤按原始名精确比对永远匹配不上，8 个资产明明全在 Release 上却 5 次重试后判失败。改为双侧归一化（小写 + 空格→点）后比较。
 

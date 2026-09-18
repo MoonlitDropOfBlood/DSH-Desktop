@@ -66,6 +66,7 @@ dsh-desktop/
 `dshRuntime()` 优先级：`DSH_DESKTOP_NODE`/`npm_node_execpath` 覆盖 → 内置 node（`build/node/<平台-架构>`，`npm run fetch:node`）→ Electron 内嵌。红线：
 
 - 内置独立 Node 是**无弹窗方案**根基（Console 子系统 + CREATE_NO_WINDOW 整树继承无窗口控制台；Electron GUI 子系统无控制台可继承 → 每条命令弹窗）——**勿移除**。安装器与核心共用同一 runtime，`windowsHide:true` 全链路。
+- **版本探测读 `.version` 标记文件**（fetch-node.js 与二进制同事务写入、随包分发），不再同步 spawn `node --version`（曾占每次核心 spawn 180–760ms 冷启动，AV 扫描首次进程诞生）；标记缺失/解析失败才回退 execFileSync 探测；`dshRuntime()` 结果进程级记忆化。
 - spawn 参数固定带 `--expose-internals`（放 bin.js 之前）：rc.7+ 核心 HMR 硬要求，没有它核心启动后崩死；对新老核心安全、无需门禁。
 - **核心保持 100% 原始，绝不打补丁**；原生包全是 NAPI（引入 NAN 包会破坏内置 Node 方案）。
 - **URL 提取必须保完整 token**（`url-extract.js`）——改 URL 相关先跑 `node scripts/test-url-extract.js`，绝不要改回"只到端口"。

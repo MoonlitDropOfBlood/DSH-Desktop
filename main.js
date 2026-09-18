@@ -49,6 +49,15 @@ const { compareCoreVersions, isAtLeastByTriple, isNewer } = require("./core-vers
 const { pickShellAsset, parseAssetDigest } = require("./shell-asset.js");
 const { parseSettingsText } = require("./settings-json.js");
 
+// stdout/stderr may be PIPES whose reader went away (dev shells, CI output
+// collectors, background-job harnesses): an async EPIPE then surfaces from
+// the stream as an uncaughtException — and our handler logs, re-throwing
+// EPIPE, looping at ~30 MB/s of log spam (measured 2026-09-18). Swallow
+// stream-level write errors; the file sink in log() is authoritative.
+for (const stream of [process.stdout, process.stderr]) {
+  try { if (stream) stream.on("error", () => {}); } catch { /* not attachable */ }
+}
+
 const DEFAULT_PORT = 3080;
 
 // Display brand. NOTE: package.json productName stays "DeepSeek Harness
@@ -153,6 +162,12 @@ const SMOKE_BOOT_TIMEOUT_MS = (Number(process.env.DSH_DESKTOP_SMOKE_SECONDS) > 0
 let mainWindow = null;
 let dshProc = null;
 let dshUrl = null;
+/**
+ * Spawn timestamp of the current core generation. Used only for the
+ * diagnostic "core ready in N ms" log line at URL detection — keeping boot
+ * costs attributable from the log alone (shell prep vs core boot).
+ */
+let lastSpawnAt = 0;
 /**
  * Generation counter for spawned DSH cores. EVERY deferred decision taken on
  * behalf of a core (its exit report, the adopt probe, openDSH) must carry the
@@ -279,7 +294,12 @@ let updateParkedTree = false;
 let mainLogPath = null;
 function log(msg) {
   const line = `[dsh-desktop] ${msg}`;
-  console.log(line);
+  // console.log CAN throw EPIPE when stdout is a broken pipe (output piped to
+  // a reader that exited). Left uncaught it recursed through the
+  // uncaughtException handler — which itself calls log() — flooding the log
+  // file at ~30 MB/s (measured 2026-09-18). The file sink below is the
+  // authoritative one; console loss must never take the process down.
+  try { console.log(line); } catch { /* broken stdout pipe — ignore */ }
   logTail.push(line);
   if (logTail.length > 600) logTail.shift();
   // Persist to a small rotating file: in the packaged app console output is
@@ -745,26 +765,49 @@ function nodeAtLeast(majorMinor, minMajor, minMinor) {
 }
 
 /**
+ * Version of the bundled standalone Node as [major, minor, patch], or null.
+ * fetch-node.js stages a `.version` marker next to the binary (shipped via
+ * extraResources), so read it instead of running `node --version`: that
+ * synchronous child-process birth sat on EVERY core spawn and cost 180–760 ms
+ * on the boot chain (cold, AV-scanned first birth per session; ~30 ms warm).
+ * Falls back to probing the binary when the marker is missing (hand-placed
+ * runtimes) or unparseable.
+ */
+function bundledNodeVersion(bin) {
+  try {
+    const m = fs.readFileSync(path.join(path.dirname(bin), ".version"), "utf8").trim().match(/^(\d+)\.(\d+)\.(\d+)$/);
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+  } catch { /* no marker — probe the binary itself */ }
+  return nodeVersion(bin);
+}
+
+/**
  * The runtime that executes the DSH core and the installer.
  * Returns `{ command, runAsNode }`:
  *   1. DSH_DESKTOP_NODE / npm_node_execpath override (a real node, no flag),
  *   2. the bundled standalone node (no flag),
  *   3. the Electron binary itself with ELECTRON_RUN_AS_NODE=1 (fallback).
+ *
+ * Memoized for the process lifetime: the bundled binary only changes with a
+ * shell update (which relaunches the app) and the env override is fixed at
+ * launch, so re-resolving per spawn bought nothing.
  */
+let _dshRuntime = null;
 function dshRuntime() {
+  if (_dshRuntime) return _dshRuntime;
   const override = process.env.DSH_DESKTOP_NODE || process.env.npm_node_execpath;
   if (override) {
-    try { if (fs.existsSync(override)) return { command: override, runAsNode: false }; } catch { /* fall through */ }
+    try { if (fs.existsSync(override)) return (_dshRuntime = { command: override, runAsNode: false }); } catch { /* fall through */ }
   }
   const bundled = bundledNode();
   if (bundled) {
-    const v = nodeVersion(bundled);
+    const v = bundledNodeVersion(bundled);
     if (nodeAtLeast(v, MIN_NODE_MAJOR, MIN_NODE_MINOR)) {
-      return { command: bundled, runAsNode: false };
+      return (_dshRuntime = { command: bundled, runAsNode: false });
     }
     log(`bundled node@${v ? v.join(".") : "?"} below DSH's Node floor — falling back to embedded runtime`);
   }
-  return { command: process.execPath, runAsNode: true };
+  return (_dshRuntime = { command: process.execPath, runAsNode: true });
 }
 
 /**
@@ -1733,7 +1776,10 @@ function spawnDSH() {
         });
       };
       log(`port ${port} not released yet after restart kill — waiting briefly`);
-      setTimeout(recheck, 400);
+      // First recheck NOW, not after a blind 400 ms pre-delay: killDSH already
+      // waited for actual death plus the settle window, so the port is usually
+      // free immediately — the pre-delay was pure latency on every restart.
+      recheck();
     });
   });
 }
@@ -1795,6 +1841,7 @@ function doSpawn(found) {
     windowsHide: true
   });
   dshProc = child;
+  lastSpawnAt = Date.now();
   // Remember where THIS generation's output begins in logTail: the plugin
   // recovery parser must only see this boot's lines — a previous failed
   // attempt's "failed to apply loader entry …" text still sitting in the tail
@@ -1907,6 +1954,7 @@ function handleLine(line) {
   if (url && !dshUrl) {
     dshUrl = url;
     log(`detected URL: ${dshUrl}`);
+    if (lastSpawnAt) log(`core ready in ${Date.now() - lastSpawnAt} ms (spawn → URL)`);
     clearWatchdog();
     sendStatus("Web 服务已就绪，正在打开…");
     waitForServerThenOpen(dshUrl);
@@ -2090,8 +2138,10 @@ function killDSH(cb) {
     const iv = setInterval(() => {
       if (proc.exitCode !== null || proc.signalCode !== null || Date.now() - t0 > 8000) {
         clearInterval(iv);
-        syncSleep(400); // settle window: handle release can lag the death signal
-        settle();
+        // Settle window: handle release can lag the death signal. ASYNC — the
+        // old syncSleep(400) here hard-froze the main thread on every
+        // restart/quit (window drag, splash, tray all stalled mid-restart).
+        setTimeout(settle, 400);
       }
     }, 100);
   };
