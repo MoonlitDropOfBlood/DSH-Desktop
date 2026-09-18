@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **build-installers 发布 job 的 401 Bad credentials（v1.10.0 发布事故）**：`release` job 的三个 gh CLI 步骤用 `secrets.GH_TOKEN`（个人 PAT）调 GitHub API——该 secret 未配置/失效时 gh 直接报 `401 Unauthorized: Bad credentials`，Release 发不出去（4 个构建 job 全部成功、产物已上传，唯独最后一步发布失败）。工作流顶部本就有 `permissions: contents: write`，内置 `GITHUB_TOKEN` 的权限完全覆盖「创建/编辑 Release + 上传资产」，改为 `secrets.GITHUB_TOKEN` 后不再依赖任何仓库 secret，这类失败从根上消失。`release-whaleharbor-promo.yml` 此前已用 `GH_TOKEN || GITHUB_TOKEN` 兜底，本次对齐。
+
 ## [1.10.0] - 2026-09-18
 
 ### 新增

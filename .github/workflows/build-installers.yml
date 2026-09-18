@@ -2,7 +2,9 @@ name: Build Installers
 
 # 手动触发（workflow_dispatch）只构建 + 上传 artifact；
 # 打 v* 标签时（如 v1.0.0）额外把所有平台产物发布为一个正式 GitHub Release。
-# 发布需要仓库 secret：GH_TOKEN（GitHub Personal Access Token，需 contents:write 权限）。
+# 发布直接用内置 GITHUB_TOKEN（本文件顶部的 permissions: contents: write 已授权
+# 创建/编辑 Release 与上传资产），不需要任何仓库 secret（2026-09-18 v1.10.0 事故：
+# 原用 secrets.GH_TOKEN 个人 PAT，未配置/失效时 gh 报 401 Bad credentials，Release 发不出去）。
 on:
   workflow_dispatch:
   push:
@@ -203,7 +205,7 @@ jobs:
       # --clobber 幂等覆盖，最后校验全部产物在 Release 上才判成功，重跑/补传都安全。
       - name: Create GitHub Release (idempotent)
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
@@ -217,7 +219,7 @@ jobs:
           fi
       - name: Upload assets with per-file retry
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
@@ -239,7 +241,7 @@ jobs:
           [ "$fail" -eq 0 ]
       - name: Verify all assets are on the release
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
