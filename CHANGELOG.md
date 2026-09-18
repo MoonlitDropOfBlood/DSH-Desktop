@@ -12,7 +12,7 @@
 
 ### 变更
 
-- **核心启动链提速（spawn 前 shell 侧开销 ~54ms，此前实测 184–796ms）**：① `dshRuntime()` 不再为选运行时**同步 spawn `node.exe --version`**——改为读 fetch-node.js 早就写在二进制旁的 `.version` 标记（缺失/解析失败才回退 execFileSync 探测），并把解析结果进程级记忆化（内置 node 只随壳更新变化、override env 启动即固定）；② 重启链杀核后的首次端口复查**立即执行**（killDSH 已等死透 + settle 窗，原来的盲等 400ms 前摇是纯延迟）；③ `killDSH` 的 400ms settle 从 `syncSleep` 改为异步定时器——原实现每次重启/退出都把主线程硬冻结 400ms（窗口拖动/托盘/启动页全卡）。新增启动耗时日志 `core ready in N ms (spawn → URL)`，以后启动变慢可直接从日志归因（壳准备 vs 核心自身启动）。真机验证（隔离环境 + E2E_RESTARTS 钩子）：冷启动 spawn 后 4377ms 就绪，完整重启链 4.76s。
+- **核心启动链提速（spawn 前 shell 侧开销 ~54ms，此前实测 184–796ms）**：① `dshRuntime()` 不再为选运行时同步 spawn `node.exe --version`——改为读 fetch-node.js 早就写在二进制旁的 `.version` 标记（缺失/解析失败才回退 execFileSync 探测），并把解析结果进程级记忆化（内置 node 只随壳更新变化、override env 启动即固定）；② 重启链杀核后的首次端口复查立即执行（killDSH 已等死透 + settle 窗，原来的盲等 400ms 前摇是纯延迟）；③ `killDSH` 的 400ms settle 从 `syncSleep` 改为异步定时器——原实现每次重启/退出都把主线程硬冻结 400ms（窗口拖动/托盘/启动页全卡）。新增启动耗时日志 `core ready in N ms (spawn → URL)`，以后启动变慢可直接从日志归因（壳准备 vs 核心自身启动）。真机验证（隔离环境 + E2E_RESTARTS 钩子）：冷启动 spawn 后 4377ms 就绪，完整重启链 4.76s。
 
 ### 修复
 

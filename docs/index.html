@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.0 亮点</h4><ul><li><strong>splash + 设置页 + 托盘/菜单 i18n（AGENTS §6c）</strong>：新增纯函数模块 locales.js（zh-CN / en-US 两套词典 + t() /…</li><li><strong>电池友好模式（AGENTS §6d）</strong>：新增纯函数模块 powerplan.js（decidePowerPlan() + formatPowerHint()），核心是「未插电且电量 &lt;…</li><li><strong>测试链加 2 个新单测 + 1 个守卫</strong>：scripts/test-locales.js（约 40 个 t/detectLocale/词典完整性断言，含「splash 引用的 key…</li></ul>',
+      'rel.fallback': '<h4>v1.10.1 亮点</h4><ul><li><strong>核心启动链提速（spawn 前 shell 侧开销 ~54ms，此前实测 184–796ms）</strong>：① dshRuntime() 不再为选运行时同步 spawn node.exe --version——改为读 fetch-node.js 早就写在二进制旁的 .version…</li><li><strong>log() 的 stdout EPIPE 崩溃风暴</strong>：stdout 是管道且读取方先退出时（dev 管道、CI 采集器、后台任务托管），EPIPE 从流上**异步**抛出 → uncaughtException → 处理器自己又…</li><li><strong>build-installers 发布 job 的 401 Bad credentials（v1.10.0 发布事故）</strong>：release job 的三个 gh CLI 步骤用 secrets.GH_TOKEN（个人 PAT）调 GitHub API——该 secret 未配置/失效时 gh…</li><li><strong>build-installers 资产校验的空间→点号误判（v1.10.0 发布事故续）</strong>：GitHub 上传资产时把文件名空格规范成点号（DeepSeek Harness Desktop Setup 1.10.0.exe →…</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.0 highlights</h4><ul><li><strong>splash + 设置页 + 托盘/菜单 i18n（AGENTS §6c）</strong>：新增纯函数模块 locales.js（zh-CN / en-US 两套词典 + t() /…</li><li><strong>电池友好模式（AGENTS §6d）</strong>：新增纯函数模块 powerplan.js（decidePowerPlan() + formatPowerHint()），核心是「未插电且电量 &lt;…</li><li><strong>测试链加 2 个新单测 + 1 个守卫</strong>：scripts/test-locales.js（约 40 个 t/detectLocale/词典完整性断言，含「splash 引用的 key…</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.10.1 highlights</h4><ul><li><strong>核心启动链提速（spawn 前 shell 侧开销 ~54ms，此前实测 184–796ms）</strong>：① dshRuntime() 不再为选运行时同步 spawn node.exe --version——改为读 fetch-node.js 早就写在二进制旁的 .version…</li><li><strong>log() 的 stdout EPIPE 崩溃风暴</strong>：stdout 是管道且读取方先退出时（dev 管道、CI 采集器、后台任务托管），EPIPE 从流上**异步**抛出 → uncaughtException → 处理器自己又…</li><li><strong>build-installers 发布 job 的 401 Bad credentials（v1.10.0 发布事故）</strong>：release job 的三个 gh CLI 步骤用 secrets.GH_TOKEN（个人 PAT）调 GitHub API——该 secret 未配置/失效时 gh…</li><li><strong>build-installers 资产校验的空间→点号误判（v1.10.0 发布事故续）</strong>：GitHub 上传资产时把文件名空格规范成点号（DeepSeek Harness Desktop Setup 1.10.0.exe →…</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.0';
+  var latestVer = 'v1.10.1';
   var lastRelease = null;
 
   function escHtml(s) {
