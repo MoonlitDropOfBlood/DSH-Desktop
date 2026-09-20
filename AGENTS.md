@@ -133,7 +133,7 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 - 拖拽区是**细条 + `topClearance()` 运行时量高**，勿改回整条 36px；主条 clamp 6–16px 上限是故意的；勿给侧栏容器加 drag。
 - macOS 吞点击坑：容器不带 app-region，独立细条承载 drag，按钮显式 no-drag。
 - 控制条经 `ReactDOM.createPortal(..., document.body)` 渲染；**绝不手动 appendChild React 管理的节点**（调和 NotFoundError，按钮全灭）。
-- 0.1.5+ 金刚键 = 原生风格 28px 角落小组件 + **常量** `margin-right:80px`（常量不测量）；**LEGACY(≤0.1.4) 完全保持现状**；模式判定权威信号 = 版本三元组 ≥0.1.5（DOM 标记只做解析前兜底；版本解析成功后 body 级观察者即 disconnect）。
+- 0.1.5+ 金刚键 = 原生风格 28px 角落小组件 + **常量** `margin-right:80px`（常量不测量）；右栏打开时 corner 座位必须整条 `display:none`（slot outlet 恒留 `display:contents` 锚点 div，核心 `:empty` 永不命中；**勿用 `:has()` 探测 corner 内容**——Chromium 跨该锚点的 `:has()` 失效重算不可靠，2026-09 实测把收起态展开按钮误藏——现行方案：MutationObserver+2s 轮询把面板 `data-sidebar-right-open` 镜像成 `<html data-dsh-desktop-rightbar-open>` 状态标记，CSS 按标记隐藏，否则头部残留 88px 死区）；**LEGACY(≤0.1.4) 完全保持现状**；模式判定权威信号 = 版本三元组 ≥0.1.5（DOM 标记只做解析前兜底；版本解析成功后 body 级观察者即 disconnect）。
 - Session log 隐藏规则只限桌面（`data-dsh-desktop` 标记）；原生逃生通道（Ctrl+M/W、mac 编辑菜单角色）必须保留。
 - `sync()` 测量**先读后写 + rAF 合并 + 侧栏失联自愈**（2026-09-16 优化，测量语义未动）。
 

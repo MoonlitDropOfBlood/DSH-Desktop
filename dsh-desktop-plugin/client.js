@@ -534,9 +534,13 @@ window.__ModuleLoader__.load({
 		//            derived from our own fixed metrics: 3×28px buttons + 2×4px
 		//            gaps + 8px gap + 8px window inset), so the group sits in the
 		//            freed corner space right of it;
-		//          · right sidebar OPEN → the corner button hides (:empty) and
-		//            the panel's own chrome (fullscreen/collapse) is pushed left
-		//            by the measured --dsh-desktop-controls-clear var instead;
+		//          · right sidebar OPEN → the corner seat is hidden outright via
+		//            the data-dsh-desktop-rightbar-open <html> marker (the slot
+		//            outlet's display:contents anchor defeats core's :empty
+		//            rule, and :has() content detection proved unreliable
+		//            across that anchor) and the panel's own chrome
+		//            (fullscreen/collapse) is pushed left by the measured
+		//            --dsh-desktop-controls-clear var instead;
 		//          · no/blank conversation → no DSH chrome at the top-right at
 		//            all, the group stands alone.
 		//          (An earlier draft put the buttons INSIDE the header via the
@@ -1360,11 +1364,32 @@ window.__ModuleLoader__.load({
    occupies 3×28px buttons + 2×4px gaps = 92px ending at window right − 8px,
    so the corner must end at ≤ window right − 108px → margin 108 − 28 = 80px.
    (Overrides the wrapper's own margin-right:-16px via higher specificity.)
-   When the right sidebar is OPEN the corner is :empty (display:none) and
-   this rule is inert. Constant, never measured: if DSH ever grows the
-   header's right padding the gap just widens — it can never overlap. */
+   Constant, never measured: if DSH ever grows the header's right padding
+   the gap just widens — it can never overlap. */
 [data-dsh-desktop] [data-conversation-header-corner] {
   margin-right: 80px;
+}
+
+/* When the right sidebar is OPEN the corner seat must hide COMPLETELY: the
+   panel then has its own chrome (fullscreen/collapse) with its own clearance
+   (the measured --dsh-desktop-controls-clear below), and a still-displayed
+   empty corner would leave an 88px dead zone (its margin-left:8 + the 80px
+   above) in the header — double-avoiding a corner group that by then sits
+   over the panel, not the header. Core intends exactly this via
+   ".headerCorner:empty{display:none}", but the slot outlet ALWAYS leaves its
+   permanent display:contents anchor (<div data-slot="conversation.session
+   .header.corner">) as a child — even when the ExpandButton renders null —
+   so :empty never matches and core's rule never fires. A content-based fix
+   (:has() over the corner's descendants) was tried and dropped: Chromium's
+   :has() invalidation across that display:contents anchor did not
+   re-evaluate when React removed/re-added the expand button, so the
+   collapsed-state button stayed hidden (2026-09 live-verified). The state
+   marker is deterministic instead: apply() mirrors the panel's own
+   data-sidebar-right-open attribute onto <html> (attribute-filtered
+   MutationObserver + 2s poll for detached-node remounts), and this rule
+   keys off it. */
+[data-dsh-desktop][data-dsh-desktop-rightbar-open] [data-conversation-header-corner] {
+  display: none;
 }
 
 /* FIXED corner group (0.1.5+): aligned with DSH's own 28px button rows —
@@ -1595,6 +1620,39 @@ window.__ModuleLoader__.load({
 						attributeFilter: ["data-sidebar-right-open"]
 					});
 					return () => detachDomFallback();
+				});
+			}
+			// Rightbar-open state marker on <html> (drives the CSS rule that
+			// hides the emptied header corner seat while the rightbar is open —
+			// see the CSS block). The panel stays mounted across open/close and
+			// flips its own data-sidebar-right-open attribute; mirror that
+			// instead of probing the corner's content (core's :empty rule is
+			// defeated by the slot outlet's permanent display:contents anchor,
+			// and :has() invalidation across that anchor proved unreliable —
+			// it hid the collapsed-state expand button, 2026-09 live-tested).
+			// attributeFilter keeps this off the streaming childList path; the
+			// 2s poll covers panel remounts that set the attribute while the
+			// node was still detached (React sets attributes pre-insertion).
+			if (isDesktop && typeof MutationObserver !== "undefined" && typeof ctx.effect === "function") {
+				ctx.effect(() => {
+					const root = document.documentElement;
+					const syncRightbarOpen = () => {
+						const open = !!document.querySelector("[data-sidebar-right-open]");
+						if (open) root.setAttribute("data-dsh-desktop-rightbar-open", "");
+						else root.removeAttribute("data-dsh-desktop-rightbar-open");
+					};
+					syncRightbarOpen();
+					const observer = new MutationObserver(syncRightbarOpen);
+					observer.observe(document.body, {
+						attributes: true, subtree: true,
+						attributeFilter: ["data-sidebar-right-open"]
+					});
+					const poll = setInterval(syncRightbarOpen, 2000);
+					return () => {
+						observer.disconnect();
+						clearInterval(poll);
+						root.removeAttribute("data-dsh-desktop-rightbar-open");
+					};
 				});
 			}
 			if (isDesktop && hasBridge("getUpdateState")) {

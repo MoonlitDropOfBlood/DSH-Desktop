@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **右栏展开后会话头部残留 88px 死区（金刚键双重避让）**：0.1.5+ 现行方案假设「右栏打开 → 头部 corner 座位 `:empty` 自动隐藏」，但核心槽位 outlet 恒留一个 `display:contents` 锚点 div（`<div data-slot="conversation.session.header.corner">`）作为子节点——即使 ExpandButton 在展开态渲染 null——`:empty` 永不命中，核心的 `:empty{display:none}` 与「margin-right:80px 规则随之失效」的设计前提一并落空：展开后空 corner 仍以 `margin-left:8 + margin-right:80` 占位，头部右缘留出 88px 死区（此时金刚键小组件落在面板上方、面板自带的全屏/收起按钮已由 `--dsh-desktop-controls-clear` 正确避让，头部这份避让纯属多余）。修复：apply() 新增一个 attributeFilter MutationObserver（+2s 轮询兜底面板重挂载），把面板的 `data-sidebar-right-open` 状态镜像为 `<html data-dsh-desktop-rightbar-open>` 标记，CSS `[data-dsh-desktop][data-dsh-desktop-rightbar-open] [data-conversation-header-corner]{display:none}` 按标记整条隐藏——**刻意不用 `:has()` 探测 corner 内容**：Chromium 跨 `display:contents` 锚点的 `:has()` 失效重算不可靠，实测会把收起态的展开按钮一并误藏（本次经会话内动态插件两态实测验证：展开态 corner 完全脱离布局、收起态按钮正常显示）。LEGACY（≤0.1.4）无该 DOM 属性、结构性不受影响；普通浏览器无 `data-dsh-desktop` 标记同样不受影响。
+
 ## [1.10.1] - 2026-09-18
 
 ### 变更
