@@ -1711,7 +1711,7 @@ function spawnDSH() {
   ensureDSH((found) => {
     if (!found || quitRequested) {
       // Chain aborted before any child existed — release the restart guard
-      // so a later Ctrl+Alt+R / panel retry can re-enter.
+      // so a later Ctrl+Alt+Shift+R / panel retry can re-enter.
       restartRequested = false;
       // Installer reported success but resolveDSHBin() still comes up empty
       // (pseudo-success, or antivirus quarantined the tree): a bare return
@@ -1852,7 +1852,7 @@ function doSpawn(found) {
   // until killDSH's callback): the killed core's "exit" event can be
   // delivered after the callback already ran, and without the flag the late
   // exit would read as a fresh crash ("启动失败" panel mid-restart). It also
-  // keeps a second Ctrl+Alt+R during the async spawn chain (ensureDSH →
+  // keeps a second Ctrl+Alt+Shift+R during the async spawn chain (ensureDSH →
   // isPortFree → here) from double-spawning two cores that race for the port.
   restartRequested = false;
 
@@ -1877,7 +1877,7 @@ function doSpawn(found) {
     // already doSpawn()'d the NEXT core (main-loop congestion delays libuv's
     // child-wait callback; measured: delivery can lag arbitrarily). Without
     // identity/generation guards, a stale exit would (a) null dshProc while
-    // the NEW core runs — orphaning it, so every later Ctrl+Alt+R finds no
+    // the NEW core runs — orphaning it, so every later Ctrl+Alt+Shift+R finds no
     // child to kill and the port stays busy forever ("端口已被占用" on every
     // subsequent restart) — and (b) disarm the NEW core's startup watchdog.
     if (dshProc === child) dshProc = null;
@@ -1920,7 +1920,7 @@ function doSpawn(found) {
     const port = effectivePort();
     const url = `http://127.0.0.1:${port}`;
     probeServerUp(url, ADOPT_RESTART_GRACE_MS, (up) => {
-      // The user may have pressed Ctrl+Alt+R (or an update restarted the
+      // The user may have pressed Ctrl+Alt+Shift+R (or an update restarted the
       // core) while this probe was polling — the port answering then belongs
       // to OUR OWN new child, never to an external replacement. Adopting it
       // would record the shell's own child in adoptedPid and fire a second
@@ -2298,7 +2298,7 @@ function attemptPluginRecovery(freshTail) {
 
 function restartDSH() {
   // isUpdating: an install in progress ends with its OWN restartDSH() — a
-  // manual Ctrl+Alt+R here would kill the mid-install state and its splash.
+  // manual Ctrl+Alt+Shift+R here would kill the mid-install state and its splash.
   // installInProgress (first install / update download): respawning now could
   // resolve a half-written tree — a manual restart stays a no-op until done.
   // Returns whether a restart actually STARTED (the tray item / settings-page
@@ -2311,7 +2311,7 @@ function restartDSH() {
     // NOTE: restartRequested stays TRUE from here until doSpawn() assigns the
     // fresh child — resetting it here (as before) re-opened two races: the
     // killed core's late "exit" event arrived after this callback and painted
-    // a "启动失败" panel mid-restart, and a second Ctrl+Alt+R during the
+    // a "启动失败" panel mid-restart, and a second Ctrl+Alt+Shift+R during the
     // async spawn chain double-spawned two cores racing for the port.
     dshUrl = null;
     clearWatchdog();
@@ -3404,12 +3404,12 @@ function rebuildTrayMenu() {
   const template = [
     { label: t("tray.menu.open", locale, "打开鲸港"), click: () => showMainWindow() },
     {
-      // Same restart chain as the app-menu Ctrl+Alt+R. The accelerator is
+      // Same restart chain as the app-menu Ctrl+Alt+Shift+R. The accelerator is
       // DISPLAY-ONLY in tray context menus (the working registration lives in
       // the app menu) — but Windows users have no visible menu bar at all, so
       // spelling the shortcut here is how they ever discover it.
       label: t("tray.menu.restartCore", locale, "重启核心"),
-      accelerator: "CommandOrControl+Alt+R",
+      accelerator: "CommandOrControl+Alt+Shift+R",
       click: () => { showMainWindow(); restartDSH(); }
     }
   ];
@@ -4085,7 +4085,7 @@ ipcMain.handle("dsh:restartApp", () => {
   return true;
 });
 // Restart ONLY the DSH core (kill + respawn; the shell keeps running) — the
-// settings page's 重启核心 button. Same chain as the Ctrl+Alt+R menu item and
+// settings page's 重启核心 button. Same chain as the Ctrl+Alt+Shift+R menu item and
 // the tray entry. The boolean tells the button whether a restart actually
 // started (false while already restarting / updating / installing).
 ipcMain.handle("dsh:restartCore", () => restartDSH());
@@ -4484,7 +4484,7 @@ ipcMain.handle("dsh:setPowerSaveMode", (_e, value) => {
 
 // Dev/e2e hook (never set in production): DSH_DESKTOP_E2E_RESTARTS="N[,ms]"
 // auto-invokes restartDSH() N times, ms after each successful openDSH — this
-// exercises the real Ctrl+Alt+R chain (kill → port wait → respawn) headlessly.
+// exercises the real Ctrl+Alt+Shift+R chain (kill → port wait → respawn) headlessly.
 const E2E_RESTARTS = (() => {
   const m = /^(\d+)(?:,(\d+))?$/.exec(process.env.DSH_DESKTOP_E2E_RESTARTS || "");
   return m ? { left: Number(m[1]), intervalMs: Number(m[2] || 12000) } : null;
@@ -4533,7 +4533,7 @@ function buildMenu() {
     {
       label: "DSH",
       submenu: [
-        { label: t("menu.dsh.restartCore", locale, "重新启动 DSH"), accelerator: "CmdOrCtrl+Alt+R", click: () => restartDSH() },
+        { label: t("menu.dsh.restartCore", locale, "重新启动 DSH"), accelerator: "CmdOrCtrl+Alt+Shift+R", click: () => restartDSH() },
         { type: "separator" },
         // Native escape hatches: these always work even if the DSH-rendered
         // window controls are missing (plugin failure, frozen page, etc.).

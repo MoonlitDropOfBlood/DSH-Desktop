@@ -141,7 +141,7 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 
 ### 5. 托盘 + 常驻通知栏
 
-托盘图标在**开启设置当下**创建（勿只在关闭时建）；macOS 用模板图 `tray-iconTemplate(.png/@2x.png)`；一切退出路径先 `isQuitting = true`；托盘内置「重启核心」（Ctrl+Alt+R）与设置页按钮同一链路，`restartDSH()` 忙时静默 no-op 返回 false。细节 → [docs/agents/desktop-ui.md](docs/agents/desktop-ui.md) §5。
+托盘图标在**开启设置当下**创建（勿只在关闭时建）；macOS 用模板图 `tray-iconTemplate(.png/@2x.png)`；一切退出路径先 `isQuitting = true`；托盘内置「重启核心」（Ctrl+Alt+Shift+R；v1.10.3 起——原 Ctrl+Alt+R 与 DSH 0.1.7 快捷键系统的默认键位规划区 `Ctrl+Alt+X` 冲突，勿改回）与设置页按钮同一链路，`restartDSH()` 忙时静默 no-op 返回 false。细节 → [docs/agents/desktop-ui.md](docs/agents/desktop-ui.md) §5。
 
 ### 6. 阻止休眠 / 任务通知 / 设置持久化
 

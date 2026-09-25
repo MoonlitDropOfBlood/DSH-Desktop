@@ -119,7 +119,7 @@ window.__dshFloat.send(data)    // 上行 → 反向通道 float.window.input
 1. curl 直调桥：`float.window.create`（html 模式，一个 CSS 小方块）→ 屏幕右下角出现、任务栏无图标、点击主窗口输入框焦点不被抢走。
 2. `float.window.state` 推 `{pose}` → 页面动画切换；连推 10 次只保留最新。
 3. 页面拖拽区拖动浮窗；交互点点击 → 主日志可见 `float.window.input` 回投。
-4. `restartDSH`（Ctrl+Alt+R）→ 浮窗关闭、新核心起、插件重新 create 成功。
+4. `restartDSH`（Ctrl+Alt+Shift+R，旧称 Ctrl+Alt+R）→ 浮窗关闭、新核心起、插件重新 create 成功。
 5. taskkill 核心（模拟崩溃）→ 12s 收养探测窗口内浮窗已消失，不留孤儿。
 6. 设置页关「允许插件浮窗」→ 现存浮窗立即关闭，create 被拒。
 7. `clickThrough:true` 的浮窗：点它穿透到桌面；页面仍能感知悬停。
