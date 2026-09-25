@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.2 亮点</h4><ul><li><strong>右栏展开后会话头部不再残留 88px 死区（金刚键双重避让修复）</strong>：核心槽位 outlet 恒留 <code>display:contents</code> 锚点 div，头部 corner 座位的 <code>:empty</code> 隐藏规则永不命中——右栏展开后空 corner 仍占 margin-left:8 + margin-right:80 = 88px 占位。现由 MutationObserver 把面板 <code>data-sidebar-right-open</code> 镜像为 <code>&lt;html&gt;</code> 状态标记、CSS 按标记整条隐藏 corner，收起态展开按钮不受影响（刻意不用 <code>:has()</code> 内容探测：Chromium 跨该锚点的失效重算不可靠，实测会误藏收起态按钮）。</li></ul>',
+      'rel.fallback': '<h4>v1.10.3 亮点</h4><ul><li><strong>「重启核心」快捷键改为 Ctrl+Alt+Shift+R（macOS ⌘⌥⇧R）</strong>：DSH 0.1.7 的快捷键系统把 <code>Ctrl+Alt+X</code> 系划为默认键位规划区（右栏开关 Ctrl+Alt+B、打开本地 Ctrl+Alt+O、全屏 Ctrl+Alt+Enter 等已占用），原 Ctrl+Alt+R 与其冲突。新键保留 R 的 Restart 语义、跳出双修饰规划区，浏览器与系统均不占用。菜单、托盘与设置页文案已同步更新。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.2 highlights</h4><ul><li><strong>No more 88px dead zone in the conversation header when the right sidebar is open</strong>：the slot outlet\'s permanent <code>display:contents</code> anchor defeats the core\'s <code>:empty</code> rule, so the emptied corner seat kept its 80px push. A MutationObserver now mirrors the panel\'s <code>data-sidebar-right-open</code> onto <code>&lt;html&gt;</code> and CSS hides the seat via that marker; the collapsed-state expand button is unaffected (deliberately no <code>:has()</code> probing — Chromium\'s invalidation across the anchor proved unreliable).</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.10.3 highlights</h4><ul><li><strong>Restart-core shortcut is now Ctrl+Alt+Shift+R (macOS ⌘⌥⇧R)</strong>: DSH 0.1.7\'s shortcut system reserves the <code>Ctrl+Alt+X</code> family as its default-binding zone (right sidebar Ctrl+Alt+B, open local Ctrl+Alt+O, fullscreen Ctrl+Alt+Enter already taken), so the old Ctrl+Alt+R collided. The new chord keeps the R mnemonic, stays clear of the two-modifier zone, and clashes with nothing in the browser or OS. Menu, tray, and settings copy are updated to match.</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.2';
+  var latestVer = 'v1.10.3';
   var lastRelease = null;
 
   function escHtml(s) {

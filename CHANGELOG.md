@@ -6,6 +6,12 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.3] - 2026-09-26
+
+### 变更
+
+- **「重启核心」快捷键 Ctrl+Alt+R → Ctrl+Alt+Shift+R（macOS ⌘⌥⇧R）**：DSH 0.1.7 引入客户端快捷键系统（`dsh-client-shortcuts`），其默认键位规则把 `Ctrl+Alt+X` 系划为默认规划区——desktop 下 Ctrl+Alt+B（右栏开关）/Ctrl+Alt+O（打开本地）/Ctrl+Alt+Enter（全屏，fixed）已占用，web 下 Ctrl+Alt+T/P/O/B 更多，按规则"不含 Alt 的默认键位使用 Mod+Alt"，后续 R 系命令（刷新/重载类）落进 Ctrl+Alt+R 只是时间问题。壳的重启快捷键与该规划区冲突后让路：app 菜单（真正注册处）、托盘菜单展示项、设置页快捷键说明文案（zh/en × win/mac 四条，`locales.js` + `client.js` 内嵌副本同步）统一改为三修饰键 **Ctrl+Alt+Shift+R**——保留 R 的 Restart 语义，DSH 默认键位规则最高只到双修饰键、不会生成三修饰组合，浏览器/系统也无占用，彻底跳出冲突区。纯展示层变更：`restartDSH()` 链路、菜单结构、托盘行为均不动。
+
 ## [1.10.2] - 2026-09-21
 
 ### 修复
