@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.3 亮点</h4><ul><li><strong>「重启核心」快捷键改为 Ctrl+Alt+Shift+R（macOS ⌘⌥⇧R）</strong>：DSH 0.1.7 的快捷键系统把 <code>Ctrl+Alt+X</code> 系划为默认键位规划区（右栏开关 Ctrl+Alt+B、打开本地 Ctrl+Alt+O、全屏 Ctrl+Alt+Enter 等已占用），原 Ctrl+Alt+R 与其冲突。新键保留 R 的 Restart 语义、跳出双修饰规划区，浏览器与系统均不占用。菜单、托盘与设置页文案已同步更新。</li></ul>',
+      'rel.fallback': '<h4>v1.10.4 亮点</h4><ul><li><strong>侧栏更新徽章有了运行中状态，且更新全局只允许一个任务</strong>：此前点击鲸港自更新徽章后屏幕毫无反馈（下载进度只渲染在设置页里，从侧栏点的用户看不到），而且可以反复点击——每点一次就并行下载同一个安装包、再拉起一次安装器。现在主进程持有唯一一把更新锁，徽章按「检查中 / 下载中 N% / 正在校验安装包 / 已下载，正在启动安装程序」分阶段显示状态并在运行期间禁用点击，失败时给出「更新失败，点击重试」并可单击重试，而不是静默回到初始态；设置页的更新按钮跟随同一把锁。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.3 highlights</h4><ul><li><strong>Restart-core shortcut is now Ctrl+Alt+Shift+R (macOS ⌘⌥⇧R)</strong>: DSH 0.1.7\'s shortcut system reserves the <code>Ctrl+Alt+X</code> family as its default-binding zone (right sidebar Ctrl+Alt+B, open local Ctrl+Alt+O, fullscreen Ctrl+Alt+Enter already taken), so the old Ctrl+Alt+R collided. The new chord keeps the R mnemonic, stays clear of the two-modifier zone, and clashes with nothing in the browser or OS. Menu, tray, and settings copy are updated to match.</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.10.4 highlights</h4><ul><li><strong>The sidebar update badge now shows live status, and only one update task can run at a time</strong>: clicking the WhaleHarbor self-update badge used to give no visible feedback (download progress was rendered only in the settings page) and could be clicked again and again — every click started a parallel download of the same installer and launched it once more. The main process now holds a single global update lock: the badge reports each stage (checking / downloading N% / verifying installer / downloaded, launching installer) and is disabled while it runs; a failure offers 「Update failed — click to retry」 with a single-click retry instead of silently reverting. The settings-page update buttons follow the same lock.</li></ul><p style="font-size:12px">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.3';
+  var latestVer = 'v1.10.4';
   var lastRelease = null;
 
   function escHtml(s) {

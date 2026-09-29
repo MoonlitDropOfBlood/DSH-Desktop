@@ -6,6 +6,12 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.4] - 2026-09-29
+
+### 修复
+
+- **侧栏左下角更新徽章"点了没反应 + 能反复点"（更新全局单任务）**：两条独立根因——① 徽章**没有任何运行中状态**：鲸港自更新的进度只经 `dsh:shellDownloadProgress` 推给设置页桌面版分区，那是侧栏徽章唯一看不到的地方，点击的返回值被 `.catch(() => {})` 吞掉，屏幕上一个字都不变；② `dsh:downloadShellUpdate` **根本没有并发保护**（核心更新有自己的 `installInProgress`，壳自更新一把都没有），第二次点击会对同一个 temp 路径再起一条完整下载，两条完成回调各拉一次安装器。修复：主进程新增**全局单更新任务状态机 `updateTask`**（核心安装与鲸港自更新共用一把锁——两条链都要替换运行中的应用文件，本就不可能并行），`setUpdateTask()` 是唯一写入口（开任务/推进阶段/收尾都在这里广播，纯进度按 400ms 节流、阶段切换立即推），`pushUpdateState()` 把它连同 kind/phase/percent 推给渲染端；`sendShellProgress()` 成为壳下载进度的唯一漏斗并顺带驱动该状态；`dsh:installUpdate`/`dsh:downloadShellUpdate` 忙时回 `{busy:true}`（**不再静默 resolve 成功形状的失败**）；`updateDSH` 守卫扩为 `installInProgress || updateTaskBusy()`。渲染端徽章改三态：idle（保留两次点击防误触）/ **busy（disabled 状态徽章 + 细进度条，文案按「检查中…/下载中 N%/正在校验安装包…/已下载，正在启动安装程序…」切换，判定放在 autoUpdate 早退之前——运行中的任务没有静默这一说）**/ failed（「更新失败，点击重试」，单击即可重试，tooltip 带失败原因）；设置页两个下载按钮同步置灰。拉起安装器后状态保留 30s 再清零，避免秒内二次点击再拉一个安装器。新增 5 组 i18n key（zh-CN/en-US 同步进 `locales.js` + `client.js` 内嵌副本，`scripts/test-locales.js` 加 20 条断言）。机制详解见 [docs/agents/install-and-update.md](docs/agents/install-and-update.md) §9e。
+
 ## [1.10.3] - 2026-09-26
 
 ### 变更
