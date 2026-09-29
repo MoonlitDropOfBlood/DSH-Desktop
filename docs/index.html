@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.4 亮点</h4><ul><li><strong>侧栏更新徽章有了运行中状态，且更新全局只允许一个任务</strong>：此前点击鲸港自更新徽章后屏幕毫无反馈（下载进度只渲染在设置页里，从侧栏点的用户看不到），而且可以反复点击——每点一次就并行下载同一个安装包、再拉起一次安装器。现在主进程持有唯一一把更新锁，徽章按「检查中 / 下载中 N% / 正在校验安装包 / 已下载，正在启动安装程序」分阶段显示状态并在运行期间禁用点击，失败时给出「更新失败，点击重试」并可单击重试，而不是静默回到初始态；设置页的更新按钮跟随同一把锁。</li></ul>',
+      'rel.fallback': '<h4>v1.10.5 亮点</h4><ul><li><strong>「重启核心」快捷键在 macOS 上改为 ⌘⇧R</strong>：原来的 ⌘⌥⇧R 要三个修饰键同时按住，在 MacBook 上纯属别扭姿势。改前把 DSH 侧的键位占用逐条查证过：全树只有一条真正的 R 系快捷键声明（右栏刷新，占用 ⌘R 与 ⌘⌥R 两格），不存在 ⌘⇧R 的任何绑定，DSH 的快捷键协议也明确放行「主键 + Shift」两修饰键组合。Windows 与 Linux 保持 Ctrl+Alt+Shift+R 不变——那两端 Ctrl+Alt+R 是 DSH 的刷新、Ctrl+Shift+R 是浏览器硬刷新，三修饰键是唯一空位。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.4 highlights</h4><ul><li><strong>The sidebar update badge now shows live status, and only one update task can run at a time</strong>: clicking the WhaleHarbor self-update badge used to give no visible feedback (download progress was rendered only in the settings page) and could be clicked again and again — every click started a parallel download of the same installer and launched it once more. The main process now holds a single global update lock: the badge reports each stage (checking / downloading N% / verifying installer / downloaded, launching installer) and is disabled while it runs; a failure offers 「Update failed — click to retry」 with a single-click retry instead of silently reverting. The settings-page update buttons follow the same lock.</li></ul><p style="font-size:12px">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.10.5 highlights</h4><ul><li><strong>The restart-core shortcut is now ⌘⇧R on macOS</strong>: the old ⌘⌥⇧R needed three modifiers held at once, an awkward contortion on a MacBook. Every DSH-side binding was verified before the change: the core declares exactly one R-family shortcut (right-sidebar refresh, occupying ⌘R and ⌘⌥R), nothing binds ⌘⇧R, and DSH&rsquo;s shortcut protocol explicitly admits two-modifier primary+Shift combinations. Windows and Linux keep Ctrl+Alt+Shift+R &mdash; there Ctrl+Alt+R is DSH&rsquo;s refresh and Ctrl+Shift+R is the browser hard reload, so the three-modifier chord is the only free slot.</li></ul><p style="font-size:12px">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.4';
+  var latestVer = 'v1.10.5';
   var lastRelease = null;
 
   function escHtml(s) {

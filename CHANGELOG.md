@@ -6,6 +6,12 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.5] - 2026-09-30
+
+### 变更
+
+- **「重启核心」快捷键 macOS 特例：⌘⌥⇧R → ⌘⇧R（Windows/Linux 仍为 Ctrl+Alt+Shift+R）**：MacBook 上三修饰键是要小指+无名指+食指同时按住别扭姿势，纯属手势负担，且两端本就不该用同一个键。改前把 DSH 侧的占用查了个遍（这次不靠推测）：`dsh-client-shortcuts` 在本壳里跑的是 **web** runtime——我们的 preload 不暴露 `keyboard` 桥，`client.js:1859` 的 `runtime === "desktop"` 分支会抛 "Desktop keyboard bridge unavailable"，所以它必然落到 web 变体；全树扫描 `KeyR` 只找到**一条**真正的快捷键声明（`dsh-client-ui-sidebar-right/lib/client.js:275`，右栏 refresh = `primary+KeyR` / `primary+alt+KeyR`，其余 6 处命中是终端区裸 Ctrl+R 的放行规则、LuckySheet 表格键、xterm 枚举表），即 mac 上 `⌘R`（我们自己的刷新）与 `⌘⌥R`（DSH web 刷新）占着前两格，**不存在任何 `primary+shift+KeyR` 绑定**，且 `protocol.js:109` 明确放行 `primary`+`shift` 两修饰键。反过来 Windows/Linux 的三修饰键是真不能动：Ctrl+Alt+R 正是 DSH 的 web refresh、Ctrl+Shift+R 是 Chromium 硬刷新，只有 `modifiers.length >= 3` 那条一律放行的规则能给出第三个空位。实现上两处注册点（app 菜单注册 + 托盘展示）收敛到同一个 `restartCoreAccelerator()`，不再各写一份字面量；设置页说明文案 `core.shortcut.mac` 的 zh/en 两条改为 ⌘⇧R，Windows 两条不动。`restartDSH()` 链路、菜单结构、托盘行为均无变化。
+
 ## [1.10.4] - 2026-09-29
 
 ### 修复
