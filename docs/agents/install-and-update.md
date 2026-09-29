@@ -70,13 +70,26 @@
 
 `prepareManagedDir()` 每次都删 `pnpm-lock.yaml`。壳只跑 `pnpm add <spec>`（每次全树重解析），lockfile 没有任何收益，却携带上一版本线的快照供 peer 解析器复用——9b 事故的直接载体。**加新逻辑时不要"优化"掉这行删除**。
 
+### 9e. 全局单更新任务（`updateTask`，2026-09-29 事故后加）
+
+事故：侧栏左下角的更新徽章点下去"没反应"、还能反复点。两条独立的根因：① **徽章没有任何运行中状态**——壳自更新的进度只推给设置页的桌面版分区（`dsh:shellDownloadProgress` 的唯一消费者是 `DesktopSection`），从侧栏点的用户根本看不到；② **`dsh:downloadShellUpdate` 根本没有并发保护**（`updateDSH` 只有自己的 `installInProgress`），第二次点击会对着同一个 temp 路径再起一条完整下载，两条 `finishOk` 各拉一次安装器。
+
+修复是一个主进程状态机 `updateTask`（**核心安装与壳自更新共用同一把锁**，两条链都要替换运行中的应用文件，本就不可能并行）：
+
+- 形状：`null`（空闲）｜`{ kind:"core"|"shell", phase, percent, done:false }`（运行中）｜`{ …, done:true, error }`（已失败，徽章继续显示「更新失败，点击重试」直到下一次任务开始）。`phase` 纯粹给 UI 看：`querying` / `downloading` / `verifying` / `launching` / `stopping`。
+- **唯一写入口 `setUpdateTask()`**：开任务 / 推进阶段 / 收尾都走它，末尾调 `pushUpdateState()` 广播。纯进度推进按 `UPDATE_TASK_PUSH_MS`（400ms）节流——下载每秒几十个 chunk，每次广播都要重读 settings + 已装版本；阶段切换与终态**永远立即广播**。
+- **锁在主进程**：`dsh:installUpdate` / `dsh:downloadShellUpdate` 入口先查 `updateTaskBusy()`，忙时回 `{busy:true}`（**不要再静默 resolve 成功-shaped 的失败**，那正是"点了没反应"的手感）；`updateDSH` 的守卫从 `installInProgress` 扩成 `installInProgress || updateTaskBusy()`。
+- `sendShellProgress()` 是壳下载进度的**唯一漏斗**，顺带驱动 task（错误分支在这里收尾——安装器启动失败只走这条路，没有调用方兜底），所以侧栏徽章和设置页读的是同一份状态，不再是两路。
+- 拉起安装器成功后 task 保留 30s 再清零：win 反正 2s 后退出；其他平台避免用户秒内再点一次又拉一个安装器。
+- 渲染端（`client.js` `UpdateBadge`）三态：idle（两次点击确认）/ busy（**disabled 状态徽章 + 进度条**，文案按 phase 切换；busy 判定放在 `autoUpdate` 早退**之前**，运行中的任务没有"静默"这一说）/ failed（可点重试）。设置页两个按钮也按 `taskBusy` 置灰。
+
 ## §11. 壳自身自更新（GitHub Releases，区别于 DSH 核心的 npm 更新）
 
 - 壳的版本来源：`app.getVersion()`（package.json），`pushUpdateState()` 里带 `shellVersion`，桌面版设置页显示。
 - 检查更新：`dsh:checkShellUpdate` → `queryShellLatest()` 查 `https://api.github.com/repos/${SHELL_REPO}/releases/latest`（默认 `MoonlitDropOfBlood/DSH-Desktop`，可 `DSH_DESKTOP_SHELL_REPO` 覆盖），逐源尝试 API（直连 → 各镜像前缀）。另有 `checkShellUpdateSilent()` 定时后台检查（开机 1min 后 + 每 12h），只喂侧栏徽章不弹面板。
 - **User-Agent 必须 ASCII（2026-09-18 崩溃事故）**：`queryShellLatest`/`downloadFile` 的 UA 用 `SHELL_UA`（`"WhaleHarbor/" + app.getVersion()`）。曾用显示品牌 `APP_NAME`（"鲸港 WhaleHarbor" 含中文）——HTTP 头不允许非 latin1 字符，`https.get` **同步抛** `ERR_INVALID_CHAR`：v1.7.0 起手动「检查更新」被 `.catch` 吞成"检查失败"（壳自更新检查一直坏的根因），1.9.4 的 60s 后台检查定时器引爆成每次开机一分钟的崩溃面板。**显示文案用 APP_NAME，线上 HTTP 头一律 SHELL_UA**；定时器驱动的后台路径（checkShellUpdateSilent）整体加防御性 catch——绝不触发 uncaughtException 崩溃面板。recovery e2e 常驻 75s 存活断言覆盖该定时器窗口。
 - 按平台选资产 `shellAssetForPlatform`（规则在 `shell-asset.js`，锁在 `scripts/test-shell-asset.js`）：win32→`.exe`；darwin→arm64 用 `arm64.dmg`、x64 优先非 arm64 的 `.dmg`（**别用 `.find(/\.dmg$/)` 会误拿 arm64**）；linux→`.AppImage`（回退 `.deb`/`.rpm`）。
-- 下载：`dsh:downloadShellUpdate` → `downloadFile()`（`https.get` + 跟随 302 重定向，GitHub 资产会跳转 `objects.githubusercontent.com`；socket 30s 无数据超时）→ 进度经 `dsh:shellDownloadProgress` 推给桌面版设置 UI。**完整性校验（2026-09-16 起）**：下载完成后对 GitHub 资产的 `digest` 字段（`sha256:<hex>`，解析在 `shell-asset.js` 的 `parseAssetDigest`）做 SHA-256 校验，不匹配 = 该源失败、损坏文件删除、自动切下一源；Release 未提供 digest 时跳过校验并记日志。`asset.name` 经 `path.basename()` 清洗后才拼 temp 路径（镜像可控名字段的 `../` 逃逸封死）。全部源耗尽且发生过校验失败时，错误文案区分"校验失败"与"网络不可达"。
+- 下载：`dsh:downloadShellUpdate` → `downloadFile()`（`https.get` + 跟随 302 重定向，GitHub 资产会跳转 `objects.githubusercontent.com`；socket 30s 无数据超时）→ 进度经 `dsh:shellDownloadProgress` 推给桌面版设置 UI，**同时经 `sendShellProgress` 汇入 §9e 的全局 `updateTask`（侧栏徽章靠它显示）**。**完整性校验（2026-09-16 起）**：下载完成后对 GitHub 资产的 `digest` 字段（`sha256:<hex>`，解析在 `shell-asset.js` 的 `parseAssetDigest`）做 SHA-256 校验，不匹配 = 该源失败、损坏文件删除、自动切下一源；Release 未提供 digest 时跳过校验并记日志。`asset.name` 经 `path.basename()` 清洗后才拼 temp 路径（镜像可控名字段的 `../` 逃逸封死）。全部源耗尽且发生过校验失败时，错误文案区分"校验失败"与"网络不可达"。**入口必须先查 `updateTaskBusy()`**（§9e）——这里曾经完全没有并发保护，重复点击会并行下载同一个资产并重复拉起安装器。
 - 启动安装：`launchShellInstaller()`：win 打开 NSIS 安装包并 2s 后退出应用（安装器要替换运行中的 exe）；mac 打开 dmg；linux chmod +x 后打开 AppImage。**`shell.openPath` 失败（杀软拦截等）不再退出应用**——错误经 `dsh:shellDownloadProgress` 回给设置页，壳保持存活。
 - GitHub API 未认证限速 60 次/时，够用；网络不可达时优雅失败（toast 提示）。
 - 发布流程：打 `v*` 标签 → GitHub Actions 构建并上传资产到 Release（见 `.github/workflows/build-installers.yml`）。CI 同时上传 `*.exe.blockmap` 与 `latest.yml`（electron-builder 产物）——为将来差分更新/第二校验源预留。

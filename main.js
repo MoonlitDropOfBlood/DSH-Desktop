@@ -289,6 +289,32 @@ let pendingInstallCb = null;
 // re-invocations from the panel's 重试/换镜像 buttons.
 let updateParkedTree = false;
 
+/**
+ * THE ONE desktop update task (core install + 鲸港 self-update share it).
+ *
+ * Both flows replace files under the RUNNING app (the core update kills the
+ * DSH child, the shell update launches an installer that replaces this exe),
+ * so they can never overlap. Historically each entry point guarded only
+ * itself — updateDSH's `installInProgress` and nothing at all for
+ * dsh:downloadShellUpdate — which let a second click on the sidebar badge
+ * start a whole parallel download into the same temp file. This single state
+ * is the lock AND the renderer's status source:
+ *
+ *   null                              → idle
+ *   { kind, phase, percent, done:false } → running (phase changes push at once)
+ *   { kind, phase, percent, done:true, error } → finished, failed; the badge
+ *                                        keeps showing 「更新失败，点击重试」
+ *                                        until the next task starts.
+ *
+ * `kind` is "core" | "shell"; `phase` is a coarse step for the UI only
+ * ("stopping" / "downloading" / "verifying" / "launching" / "restarting").
+ */
+let updateTask = null;
+/** Last pushUpdateState() tick, so percent-driven pushes stay throttled. */
+let updateTaskPushAt = 0;
+/** Progress pushes below this interval are coalesced (phase changes are not). */
+const UPDATE_TASK_PUSH_MS = 400;
+
 // ---- helpers ---------------------------------------------------------------
 /** Resolved lazily on first write (after the DSH_DESKTOP_USER_DATA override). */
 let mainLogPath = null;
@@ -3481,6 +3507,11 @@ function pushUpdateState() {
     // check and by manual 检查更新 in the settings page.
     shellUpdateAvailable: Boolean(shellUpdateInfo),
     shellLatestVersion: shellUpdateInfo ? shellUpdateInfo.version : null,
+    // The ONE update task (see updateTask above): { kind, phase, percent,
+    // done, error } while running or after a failure, null when idle. The
+    // sidebar badge renders its status from this and refuses clicks — the
+    // renderer never has to guess whether a download is already running.
+    updateTask: updateTask ? Object.assign({}, updateTask) : null,
     // False = the local RPC bridge never came up (task notifications, tray
     // contributions and float windows are dead); the settings UI shows a hint.
     notifyBridgeOk: Boolean(notifyServer)
@@ -3489,6 +3520,64 @@ function pushUpdateState() {
     mainWindow.webContents.send("dsh:update-state", state);
   }
   return state;
+}
+
+/** True while an update task is actually running (a finished-but-failed task
+ *  does not block a retry). */
+function updateTaskBusy() {
+  return Boolean(updateTask && !updateTask.done);
+}
+
+/**
+ * Start / advance / finish the single update task, then push the state so the
+ * sidebar badge and the settings pages follow it. Every entry point (core
+ * install, shell self-update) goes through here — that is what makes "one
+ * task at a time" a property of the main process instead of a promise the
+ * renderer has to remember.
+ *
+ *   setUpdateTask("shell", "downloading", { percent })  — start / advance
+ *   setUpdateTask(null, null, { error })                — failed (retryable)
+ *   setUpdateTask(null)                                 — finished OK
+ *
+ * Progress-only advances are throttled to UPDATE_TASK_PUSH_MS: a download
+ * fires dozens of chunks per second and each push re-reads settings + the
+ * installed version. Phase changes and the terminal states always push.
+ */
+function setUpdateTask(kind, phase, opts) {
+  const o = opts || {};
+  if (kind === null) {
+    if (!o.error) {
+      updateTask = null;
+      updateTaskPushAt = 0;
+      pushUpdateState();
+      return;
+    }
+    // Keep the kind of the task that failed so the badge knows which label
+    // (core vs 鲸港) to show next to 「重试」.
+    updateTask = {
+      kind: (updateTask && updateTask.kind) || o.kind || "core",
+      phase: (updateTask && updateTask.phase) || "failed",
+      percent: (updateTask && updateTask.percent) || null,
+      done: true,
+      error: String(o.error)
+    };
+    updateTaskPushAt = 0;
+    pushUpdateState();
+    return;
+  }
+  const phaseChanged = !updateTask || updateTask.phase !== phase || updateTask.kind !== kind;
+  updateTask = {
+    kind,
+    phase,
+    percent: typeof o.percent === "number" ? o.percent : null,
+    done: false,
+    error: null
+  };
+  const now = Date.now();
+  if (phaseChanged || o.force === true || now - updateTaskPushAt >= UPDATE_TASK_PUSH_MS) {
+    updateTaskPushAt = now;
+    pushUpdateState();
+  }
 }
 
 /** Split "@deepseek-ai/dsh@latest" → { name: "@deepseek-ai/dsh", tag: "latest" }. */
@@ -3791,9 +3880,18 @@ function smokeBootDSH(cb) {
 }
 
 function updateDSH(cb) {
-  if (installInProgress) { cb(false); return; }
+  // ONE update task, app-wide: a core install already running (including the
+  // first-boot install) or a 鲸港 self-update in flight blocks a second one.
+  // The caller learns why through the shared `updateTask` state, not a silent
+  // false — see setUpdateTask / the busy branch of dsh:installUpdate.
+  if (installInProgress || updateTaskBusy()) {
+    log("update: refused, another update task is already running");
+    cb(false);
+    return;
+  }
   installInProgress = true;
   isUpdating = true; // DSH's deliberate shutdown during update is not a crash
+  setUpdateTask("core", "stopping", { force: true });
   log("stopping DSH for safe update");
   sendStatus("正在停止核心以安全更新…");
   killDSH(() => {
@@ -3812,18 +3910,20 @@ function updateDSH(cb) {
       currentRegistry = registry;
       log(`update: using registry ${registry}`);
       sendStatus("正在下载最新版 DSH…");
+      setUpdateTask("core", "downloading");
       installWithRetry((result) => {
         installInProgress = false;
         if (!result) { isUpdating = false; return; } // quit path (park, if any, is cleaned up by the next update)
         if (result.ok) {
           sendStatus("正在验证新版本能否启动…");
+          setUpdateTask("core", "verifying");
           smokeBootDSH((smoke) => {
             isUpdating = false;
             updateParkedTree = false;
             if (smoke.ok) {
               log("latest DSH installed (smoke boot passed)");
               latestKnown = readInstalledVersion();
-              pushUpdateState();
+              setUpdateTask(null); // clears the badge state AND pushes it
               discardParkedManagedDir();
               if (Notification.isSupported()) {
                 new Notification({ title: "更新完成", body: `DSH 已更新到 ${latestKnown ?? "最新版"}，正在重启核心…` }).show();
@@ -3842,12 +3942,14 @@ function updateDSH(cb) {
                 }).show();
               }
               sendStatus("新版本启动验证失败，已自动回滚，正在用原版本重启…");
+              setUpdateTask(null, null, { error: "新版本启动验证失败，已回滚到原版本" });
               restartDSH();
               cb(false);
             } else {
               // Nothing to roll back to (first install / park failed): let the
               // regular spawn path surface the failure with its full UX.
               sendStatus("新版本验证未通过，正在尝试启动…");
+              setUpdateTask(null, null, { error: "新版本启动验证未通过" });
               restartDSH();
               cb(false);
             }
@@ -3858,6 +3960,7 @@ function updateDSH(cb) {
           updateParkedTree = false;
           isUpdating = false;
           sendStatus("已取消更新，正在用当前版本重启…");
+          setUpdateTask(null, null, { error: "更新已取消" });
           restartDSH();
           cb(false);
         }
@@ -4068,6 +4171,14 @@ ipcMain.handle("dsh:setCoreChannel", (_e, value) => {
   return withWriteError(pushUpdateState(), write);
 });
 ipcMain.handle("dsh:installUpdate", () => new Promise((resolve) => {
+  // A second click while a task runs must say so instead of resolving
+  // `{restarted:false}`, which reads exactly like "nothing happened".
+  // installInProgress also covers the first-boot install (updateDSH refuses it
+  // too, but that refusal arrives as a plain `{restarted:false}`).
+  if (updateTaskBusy() || installInProgress) {
+    resolve({ restarted: false, busy: true });
+    return;
+  }
   try {
     updateDSH((updated) => resolve({ restarted: !!updated }));
   } catch (err) {
@@ -4133,7 +4244,7 @@ let shellUpdateInfo = null;
  *  path must NEVER reach uncaughtException (that surfaces the crash panel) —
  *  every layer gets its own catch and logs instead. */
 function checkShellUpdateSilent() {
-  if (isQuitting || isUpdating) return;
+  if (isQuitting || isUpdating || updateTaskBusy()) return;
   try {
     queryShellLatest((info) => {
       try {
@@ -4265,6 +4376,23 @@ function sha256File(file, cb) {
 }
 
 function sendShellProgress(p) {
+  // Single funnel for shell-download progress: it also drives the shared
+  // update task, so the sidebar badge follows the SAME state the settings page
+  // renders instead of a second stream that only the settings page could see
+  // (that gap is why a badge click looked like nothing had happened).
+  if (p && updateTask && updateTask.kind === "shell" && !updateTask.done) {
+    if (p.error) {
+      // A launch failure arrives here alone (no caller-side fail()); the
+      // download-failure path closes the task twice with the same text.
+      setUpdateTask(null, null, { error: p.error });
+    } else if (p.phase === "verify") {
+      setUpdateTask("shell", "verifying", { percent: 100 });
+    } else if (p.phase === "done") {
+      setUpdateTask("shell", "launching", { percent: 100 });
+    } else {
+      setUpdateTask("shell", "downloading", { percent: p.percent });
+    }
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("dsh:shellDownloadProgress", p);
   }
@@ -4289,6 +4417,14 @@ function launchShellInstaller(file) {
       // The NSIS installer needs the app closed to replace the running exe.
       setTimeout(() => { isQuitting = true; app.quit(); }, 2000);
     }
+    // Keep the badge on 「已下载，正在启动安装程序…」 for a moment instead of
+    // snapping back to an armed 「鲸港新版 x」 button: re-clicking within
+    // seconds would launch a second installer over the first. On Windows the
+    // app is quitting anyway; elsewhere the badge returns to idle.
+    setTimeout(() => {
+      if (isQuitting) return;
+      if (updateTask && updateTask.kind === "shell" && !updateTask.done) setUpdateTask(null);
+    }, 30000);
   }).catch((e) => {
     log(`open installer threw: ${(e && e.message) || e}`);
     sendShellProgress({ error: `无法启动安装包：${(e && e.message) || "未知错误"}` });
@@ -4318,11 +4454,24 @@ ipcMain.handle("dsh:checkShellUpdate", () => new Promise((resolve) => {
   });
 }));
 ipcMain.handle("dsh:downloadShellUpdate", () => new Promise((resolve) => {
+  // The badge used to let a second click start a SECOND download of the same
+  // asset into the same temp path, with the second finishOk launching the
+  // installer on top of the first. One task at a time, main-process enforced.
+  if (updateTaskBusy()) {
+    log("shell download: refused, another update task is already running");
+    resolve({ ok: false, busy: true, error: "已有更新任务在进行中" });
+    return;
+  }
+  setUpdateTask("shell", "querying", { force: true });
+  const fail = (error) => {
+    setUpdateTask(null, null, { error });
+    resolve({ ok: false, error });
+  };
   queryShellLatest((info) => {
-    if (!info) { resolve({ ok: false, error: "无法获取最新版本" }); return; }
+    if (!info) { fail("无法获取最新版本"); return; }
     const asset = shellAssetForPlatform(info.assets);
     if (!asset) {
-      resolve({ ok: false, error: `当前平台（${process.platform}/${process.arch}）没有可下载的安装包` });
+      fail(`当前平台（${process.platform}/${process.arch}）没有可下载的安装包`);
       return;
     }
     // Mirrors are community proxies — never execute an unverified binary.
@@ -4333,7 +4482,7 @@ ipcMain.handle("dsh:downloadShellUpdate", () => new Promise((resolve) => {
     const digestHex = parseAssetDigest(asset.digest);
     const safeName = path.basename(String(asset.name || ""));
     if (!safeName || safeName === "." || safeName === "..") {
-      resolve({ ok: false, error: "安装包文件名异常，已取消下载" });
+      fail("安装包文件名异常，已取消下载");
       return;
     }
     const dest = path.join(app.getPath("temp"), safeName);
@@ -4356,8 +4505,10 @@ ipcMain.handle("dsh:downloadShellUpdate", () => new Promise((resolve) => {
           ? "安装包 SHA-256 校验失败（下载内容与 GitHub 发布摘要不符，已丢弃）。请稍后重试，或从 Releases 页手动下载"
           : "所有下载源均失败（GitHub 与镜像均不可达），请检查网络后重试";
         log(`shell download failed: ${errText}`);
+        // fail() also closes the task → the badge flips to 「更新失败，点击重试」
+        // and the single-task lock releases for the next attempt.
         sendShellProgress({ error: errText });
-        resolve({ ok: false, error: errText });
+        fail(errText);
         return;
       }
       downloadFile(sources[i], dest, (got, total) => {

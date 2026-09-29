@@ -98,10 +98,15 @@ window.__ModuleLoader__.load({
 				"core.updateBadge.confirm.title": "再次点击确认安装（误触保护，会先停止核心）",
 				"core.updateBadge.label": "有新版 {latest}",
 				"core.updateBadge.confirm.label": "再次点击确认安装",
+				"core.updateBadge.busy": "正在更新核心…",
 				"shell.updateBadge.title": "鲸港新版本 {latest}（当前 {current}），点击两次下载安装",
 				"shell.updateBadge.confirm.title": "再次点击下载并安装（误触保护）",
 				"shell.updateBadge.label": "鲸港新版 {latest}",
 				"shell.updateBadge.confirm.label": "再次点击装 {latest}",
+				"shell.updateBadge.verifying": "正在校验安装包…",
+				"shell.updateBadge.launching": "已下载，正在启动安装程序…",
+				"update.busy.title": "更新任务进行中…（全局仅允许一个更新任务）",
+				"update.failed.title": "更新失败，点击重试",
 				"desktop.shellVersion": "壳版本",
 				"desktop.shellCheck": "检查更新",
 				"desktop.shellChecking": "检查中…",
@@ -191,10 +196,15 @@ window.__ModuleLoader__.load({
 				"core.updateBadge.confirm.title": "Click again to confirm (mis-click guard; stops the core first)",
 				"core.updateBadge.label": "Update {latest}",
 				"core.updateBadge.confirm.label": "Click again to confirm",
+				"core.updateBadge.busy": "Updating core…",
 				"shell.updateBadge.title": "WhaleHarbor {latest} (current {current}) — click twice to download & install",
 				"shell.updateBadge.confirm.title": "Click again to download & install (mis-click guard)",
 				"shell.updateBadge.label": "WhaleHarbor {latest}",
 				"shell.updateBadge.confirm.label": "Click again to install {latest}",
+				"shell.updateBadge.verifying": "Verifying installer…",
+				"shell.updateBadge.launching": "Downloaded — launching installer…",
+				"update.busy.title": "Update in progress… (only one update task runs at a time)",
+				"update.failed.title": "Update failed — click to retry",
 				"desktop.shellVersion": "Shell version",
 				"desktop.shellCheck": "Check for updates",
 				"desktop.shellChecking": "Checking…",
@@ -822,10 +832,17 @@ window.__ModuleLoader__.load({
 		}
 
 		// ---- 2. sidebar update badge -------------------------------------------
-		// Two-click confirm on BOTH badges: an accidental single click used to
-		// kill the whole session for a core-update install. The confirm window
-		// auto-expires after 10s. The shell (鲸港) update shares the badge slot
-		// with a quieter style — the core update always wins when both exist.
+		// Three states, driven by the ONE main-process update task
+		// (state.updateTask):
+		//   idle   → a clickable "new version" badge, two-click confirmed (an
+		//            accidental single click used to kill the whole session);
+		//   busy   → a DISABLED status showing the live step / download percent;
+		//   failed → 「更新失败，点击重试」, clickable again.
+		// The busy state is what this badge used to lack: the click resolved
+		// into nothing visible (the shell download's progress was rendered ONLY
+		// in the 桌面版 settings page) and every further click started ANOTHER
+		// download of the same asset. The main process holds the single-task
+		// lock — this component only reflects it.
 		function UpdateBadge(props) {
 			const state = useUpdateState();
 			const locale = useLocale();
@@ -843,50 +860,108 @@ window.__ModuleLoader__.load({
 			};
 			if (!hasBridge("getUpdateState")) return null;
 			if (props && props.wide === false) return null; // rail-collapsed sidebar
+
+			// A running task owns the badge slot. Checked BEFORE the autoUpdate
+			// gate on purpose: a live task is never silent, and after a failure
+			// the badge must come back to say so.
+			const task = (state && state.updateTask) || null;
+			if (task && !task.done) return busyBadge(task, locale);
+			const failedTask = (task && task.done && task.error) ? task : null;
+
 			if (!state || state.autoUpdate) return null; // autoUpdate: core updates flow silently
 
 			// 鲸港 self-update: click twice → download the installer and launch it
-			// (progress shows in the 桌面版 settings section).
+			// (the live step / percent shows HERE too, not only in the settings
+			// section the user is usually not looking at).
 			if (!state.updateAvailable && state.shellUpdateAvailable && hasBridge("downloadShellUpdate")) {
+				const failed = Boolean(failedTask && failedTask.kind === "shell");
 				return React.createElement(Button, {
 					variant: "outline",
 					size: "sm",
-					className: "dsh-desktop-update-badge is-shell" + (confirming ? " is-confirm" : ""),
-					title: confirming
-						? tClient("shell.updateBadge.confirm.title", locale)
-						: tClient("shell.updateBadge.title", locale, {
+					className: "dsh-desktop-update-badge is-shell" + (confirming ? " is-confirm" : "") + (failed ? " is-failed" : ""),
+					title: failed
+						? failedTitle(failedTask, locale)
+						: (confirming
+							? tClient("shell.updateBadge.confirm.title", locale)
+							: tClient("shell.updateBadge.title", locale, {
 								latest: state.shellLatestVersion || "",
 								current: state.shellVersion || ""
-							}),
+							})),
 					onClick: () => {
-						if (!confirming) { armConfirm(); return; }
+						// A failed task skips the two-click confirm: nothing gets replaced
+						// until the download itself succeeds.
+						if (!failed && !confirming) { armConfirm(); return; }
 						disarm();
-						if (hasBridge("downloadShellUpdate")) bridge().downloadShellUpdate().catch(() => {});
+						bridge().downloadShellUpdate().catch(() => {});
 					}
-				}, confirming
-					? tClient("shell.updateBadge.confirm.label", locale, { latest: state.shellLatestVersion || "" })
-					: tClient("shell.updateBadge.label", locale, { latest: state.shellLatestVersion || "" }));
+				}, failed
+					? tClient("update.failed.title", locale)
+					: (confirming
+						? tClient("shell.updateBadge.confirm.label", locale, { latest: state.shellLatestVersion || "" })
+						: tClient("shell.updateBadge.label", locale, { latest: state.shellLatestVersion || "" })));
 			}
 
 			if (!state.updateAvailable) return null;
+			const coreFailed = Boolean(failedTask && failedTask.kind === "core");
 			return React.createElement(Button, {
 				variant: "outline",
 				size: "sm",
-				className: "dsh-desktop-update-badge" + (confirming ? " is-confirm" : ""),
-				title: confirming
-					? tClient("core.updateBadge.confirm.title", locale)
-					: tClient("core.updateBadge.title", locale, {
+				className: "dsh-desktop-update-badge" + (confirming ? " is-confirm" : "") + (coreFailed ? " is-failed" : ""),
+				title: coreFailed
+					? failedTitle(failedTask, locale)
+					: (confirming
+						? tClient("core.updateBadge.confirm.title", locale)
+						: tClient("core.updateBadge.title", locale, {
 							latest: state.latest || "",
 							installed: state.installed || ""
-						}),
+						})),
 				onClick: () => {
-					if (!confirming) { armConfirm(); return; }
+					if (!coreFailed && !confirming) { armConfirm(); return; }
 					disarm();
-					if (hasBridge("installUpdate")) bridge().installUpdate();
+					if (hasBridge("installUpdate")) bridge().installUpdate().catch(() => {});
 				}
-			}, confirming
-				? tClient("core.updateBadge.confirm.label", locale)
-				: tClient("core.updateBadge.label", locale, { latest: state.latest || "" }));
+			}, coreFailed
+				? tClient("update.failed.title", locale)
+				: (confirming
+					? tClient("core.updateBadge.confirm.label", locale)
+					: tClient("core.updateBadge.label", locale, { latest: state.latest || "" })));
+		}
+
+		/** Label for a running update task. `percent` is only known for the
+		 *  鲸港 installer download; a core install shows its real progress on
+		 *  the splash page, so it gets one phase-free label. */
+		function taskLabel(task, locale) {
+			if (task.kind !== "shell") return tClient("core.updateBadge.busy", locale);
+			if (task.phase === "verifying") return tClient("shell.updateBadge.verifying", locale);
+			if (task.phase === "launching") return tClient("shell.updateBadge.launching", locale);
+			if (task.phase === "querying") return tClient("desktop.shellChecking", locale);
+			return typeof task.percent === "number"
+				? tClient("desktop.shellDownloading", locale, { percent: task.percent })
+				: tClient("desktop.shellDownloading.undef", locale);
+		}
+
+		/** Busy badge: a disabled button plus a hairline progress bar. The bar
+		 *  reads a CSS var instead of a computed width, so no layout math
+		 *  lives in React and an unknown percent just renders empty. */
+		function busyBadge(task, locale) {
+			const pct = typeof task.percent === "number" ? Math.max(0, Math.min(100, task.percent)) : 0;
+			return React.createElement("div", { className: "dsh-desktop-update-busy" + (task.kind === "shell" ? " is-shell" : "") },
+				React.createElement(Button, {
+					variant: "outline",
+					size: "sm",
+					disabled: true,
+					"aria-busy": true,
+					className: "dsh-desktop-update-badge is-busy" + (task.kind === "shell" ? " is-shell" : ""),
+					title: tClient("update.busy.title", locale)
+				}, taskLabel(task, locale)),
+				React.createElement("div", {
+					className: "dsh-desktop-update-bar",
+					style: { "--dsh-desktop-update-progress": pct + "%" }
+				}));
+		}
+
+		function failedTitle(task, locale) {
+			return tClient("update.failed.title", locale) + "：" + task.error;
 		}
 
 		// ---- 3. settings sections ----------------------------------------------
@@ -967,6 +1042,10 @@ window.__ModuleLoader__.load({
 			const autoUpdate = state ? !!state.autoUpdate : false;
 			const coreChannel = state && CHANNEL_LABEL_KEY[state.coreChannel] ? state.coreChannel : "latest";
 			const updateAvailable = state ? !!state.updateAvailable : false;
+			// The ONE global update task: a badge-initiated update disables this
+			// page's button too, and the main process refuses a second start.
+			const task = state ? state.updateTask : null;
+			const taskBusy = Boolean(task && !task.done);
 
 			const showToast = (text) => setToast({ text });
 			const setChannel = (value) => {
@@ -987,8 +1066,10 @@ window.__ModuleLoader__.load({
 					.finally(() => setChecking(false));
 			};
 			const doInstall = () => {
+				if (taskBusy) { showToast(tClient("core.restart.busy", locale)); return; }
 				setInstalling(true);
 				bridge().installUpdate()
+					.then((r) => { if (r && r.busy) showToast(tClient("core.restart.busy", locale)); })
 					.catch(() => showToast(tClient("core.installFailed", locale)))
 					.finally(() => setInstalling(false));
 			};
@@ -1042,8 +1123,8 @@ window.__ModuleLoader__.load({
 					}, checking ? tClient("core.checking", locale) : tClient("core.check", locale)),
 					updateAvailable
 						? React.createElement(Button, {
-							variant: "solid", size: "sm", disabled: installing, onClick: doInstall
-						}, installing ? tClient("core.installing", locale) : tClient("core.install", locale, { version: latest || "" }))
+							variant: "solid", size: "sm", disabled: installing || taskBusy, onClick: doInstall
+						}, (installing || taskBusy) ? tClient("core.installing", locale) : tClient("core.install", locale, { version: latest || "" }))
 						: null),
 				hasBridge("restartCore")
 					? React.createElement("div", { className: "dsh-desktop-row" },
@@ -1079,6 +1160,11 @@ window.__ModuleLoader__.load({
 			const allowFloatWindows = state ? state.allowFloatWindows !== false : true;
 			const bundleMarket = state ? state.bundleMarket !== false : true;
 			const powerSaveMode = power.mode;
+			// The ONE global update task — a badge-initiated download must not
+			// leave this page's button looking free (the main process refuses
+			// a second start anyway).
+			const task = state ? state.updateTask : null;
+			const taskBusy = Boolean(task && !task.done);
 
 			// Shell self-update progress pushes from the main process.
 			React.useEffect(() => {
@@ -1168,14 +1254,14 @@ window.__ModuleLoader__.load({
 					React.createElement("span", { className: "dsh-desktop-label" }, tClient("desktop.shellVersion", locale)),
 					React.createElement("span", { className: "dsh-desktop-value" }, shellVersion),
 					React.createElement(Button, {
-						variant: "outline", size: "sm", disabled: shellChecking || downloading,
+						variant: "outline", size: "sm", disabled: shellChecking || downloading || taskBusy,
 						onClick: doShellCheck
 					}, shellChecking ? tClient("desktop.shellChecking", locale) : tClient("desktop.shellCheck", locale))),
 				shellUpdateAvailable
 					? React.createElement("div", { className: "dsh-desktop-row dsh-desktop-actions" },
 						React.createElement(Button, {
-							variant: "solid", size: "sm", disabled: downloading, onClick: doShellDownload
-						}, downloading
+							variant: "solid", size: "sm", disabled: downloading || taskBusy, onClick: doShellDownload
+						}, downloading || taskBusy
 							? (dlProgress && dlProgress.percent != null
 								? tClient("desktop.shellDownloading", locale, { percent: dlProgress.percent })
 								: tClient("desktop.shellDownloading.undef", locale))
@@ -1423,6 +1509,32 @@ window.__ModuleLoader__.load({
 /* 鲸港 self-update variant: quieter neutral tint (core update keeps green). */
 .dsh-desktop-update-badge.is-shell { border-color: rgba(127,127,127,0.55) !important; color: inherit !important; }
 .dsh-desktop-update-badge.is-shell:hover { background: rgba(127,127,127,0.12) !important; }
+/* A task that finished with an error: the badge stays clickable (one click
+   retries) and says so instead of silently reverting to the idle prompt. */
+.dsh-desktop-update-badge.is-failed { border-color: #e5484d !important; color: #e5484d !important; }
+.dsh-desktop-update-badge.is-failed:hover { background: rgba(229,72,77,0.12) !important; }
+/* Running task: the badge is a status, not a target. No hover tint — a
+   clickable-looking pill during a 200 MB download is exactly the "can I click
+   it again?" signal we are removing. */
+.dsh-desktop-update-badge.is-busy { cursor: progress; opacity: 0.85; }
+.dsh-desktop-update-badge.is-busy:hover { background: transparent !important; }
+/* Busy wrapper + hairline progress bar. The fill width comes from a CSS var
+   the renderer sets, so no layout math leaks into React. */
+.dsh-desktop-update-busy { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.dsh-desktop-update-bar {
+  height: 2px; border-radius: 1px; overflow: hidden;
+  background: var(--dsw-alias-label-caption, rgba(127,127,127,0.25));
+}
+.dsh-desktop-update-bar::after {
+  content: ""; display: block; height: 100%; width: var(--dsh-desktop-update-progress, 0%);
+  background: currentColor; opacity: 0.75; transition: width 200ms linear;
+}
+.dsh-desktop-update-busy .dsh-desktop-update-badge { color: #22c55e !important; border-color: #22c55e !important; }
+.dsh-desktop-update-busy.is-shell .dsh-desktop-update-badge { color: inherit !important; border-color: rgba(127,127,127,0.55) !important; }
+/* Bar fill follows the badge tint (green = core, neutral = 鲸港), never the
+   sidebar's inherited text color. */
+.dsh-desktop-update-busy .dsh-desktop-update-bar { color: #22c55e; }
+.dsh-desktop-update-busy.is-shell .dsh-desktop-update-bar { color: rgba(127,127,127,0.9); }
 
 /* Settings section layout. */
 .dsh-desktop-settings { padding: 16px; display: flex; flex-direction: column; gap: 14px; color: var(--dsw-alias-label-secondary); font-size: 13px; }

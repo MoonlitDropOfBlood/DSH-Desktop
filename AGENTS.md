@@ -185,6 +185,7 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 - **三重防线勿删**：① park 到 `dsh.prev`，回滚用**换名** rename（**绝不能先 rmSync 再 rename**——Windows delete-pending 实测 3/3 失败）；② 冒烟启动 `smokeBootDSH` 三必须（一次性 home、剥 `DSH_DESKTOP_PORT`、探针用带 token URL）；③ 冒烟失败自动回滚（killTree 等死透再做文件手术）。
 - 安装器按目标版本线自动选 npm/pnpm（≥0.1.2 → npm；`DSH_DESKTOP_INSTALLER` 覆盖；裸机无 npm → pnpm）。
 - **`prepareManagedDir` 每次删 `pnpm-lock.yaml` 勿删**——lockfile 是 peer 偏斜事故（9b）的直接载体。
+- **更新全局只有一个任务（`updateTask`，主进程持锁）**：核心安装与鲸港自更新共用一把锁（`setUpdateTask` 是唯一写入口，`pushUpdateState` 把 `updateTask` 广播给渲染端）。忙时 `dsh:installUpdate`/`dsh:downloadShellUpdate` 必须回 `{busy:true}`，**绝不能静默 resolve 成功形状的失败**（那正是"点了没反应"的手感）；侧栏徽章的 busy 判定要放在 `autoUpdate` 早退**之前**——运行中的任务没有"静默"这一说。→ [docs/agents/install-and-update.md](docs/agents/install-and-update.md) §9e。
 
 事故复盘与全部细节 → [docs/agents/install-and-update.md](docs/agents/install-and-update.md) §9。
 

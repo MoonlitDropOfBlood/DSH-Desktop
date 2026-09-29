@@ -104,6 +104,7 @@ const DICTIONARIES = {
     "core.updateBadge.confirm.title": "再次点击确认安装（误触保护，会先停止核心）",
     "core.updateBadge.label": "有新版 {latest}",
     "core.updateBadge.confirm.label": "再次点击确认安装",
+    "core.updateBadge.busy": "正在更新核心…",
     // ---- desktop settings ------------------------------------------------
     "desktop.shellVersion": "壳版本",
     "desktop.shellCheck": "检查更新",
@@ -154,6 +155,11 @@ const DICTIONARIES = {
     "shell.updateBadge.confirm.title": "再次点击下载并安装（误触保护）",
     "shell.updateBadge.label": "鲸港新版 {latest}",
     "shell.updateBadge.confirm.label": "再次点击装 {latest}",
+    "shell.updateBadge.verifying": "正在校验安装包…",
+    "shell.updateBadge.launching": "已下载，正在启动安装程序…",
+    // Shared by BOTH badges: the one update task is running / it failed.
+    "update.busy.title": "更新任务进行中…（全局仅允许一个更新任务）",
+    "update.failed.title": "更新失败，点击重试",
     // ---- power plan strings ---------------------------------------------
     "power.lowpower.tooltip": "低功耗 · 电池 {level}%",
     "power.normal.tooltip": "电池供电",
@@ -259,6 +265,7 @@ const DICTIONARIES = {
     "core.updateBadge.confirm.title": "Click again to confirm (mis-click guard; stops the core first)",
     "core.updateBadge.label": "Update {latest}",
     "core.updateBadge.confirm.label": "Click again to confirm",
+    "core.updateBadge.busy": "Updating core…",
     "desktop.shellVersion": "Shell version",
     "desktop.shellCheck": "Check for updates",
     "desktop.shellChecking": "Checking…",
@@ -307,6 +314,11 @@ const DICTIONARIES = {
     "shell.updateBadge.confirm.title": "Click again to download & install (mis-click guard)",
     "shell.updateBadge.label": "WhaleHarbor {latest}",
     "shell.updateBadge.confirm.label": "Click again to install {latest}",
+    "shell.updateBadge.verifying": "Verifying installer…",
+    "shell.updateBadge.launching": "Downloaded — launching installer…",
+    // Shared by BOTH badges: the one update task is running / it failed.
+    "update.busy.title": "Update in progress… (only one update task runs at a time)",
+    "update.failed.title": "Update failed — click to retry",
     "power.lowpower.tooltip": "Low power · battery {level}%",
     "power.normal.tooltip": "on battery",
     "power.lowpower.label": "Low power ({level}%)",

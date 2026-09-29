@@ -54,6 +54,28 @@ eq(t("splash.action.enter", "en-US"), "Open DeepSeek Harness", "splash.action.en
 eq(t("power.lowpower.short", "zh-CN"), "低功耗", "power.lowpower.short zh-CN");
 eq(t("power.lowpower.short", "en-US"), "Low power", "power.lowpower.short en-US");
 
+// ---- update-task badge strings (AGENTS: one global update task) -------------
+// The sidebar badge renders these while the task runs / after it failed. A
+// missing key here used to surface as the raw key in the sidebar, so every
+// one is locked in both locales.
+eq(t("core.updateBadge.busy", "zh-CN"), "正在更新核心…", "core.updateBadge.busy zh-CN");
+eq(t("core.updateBadge.busy", "en-US"), "Updating core…", "core.updateBadge.busy en-US");
+eq(t("shell.updateBadge.verifying", "zh-CN"), "正在校验安装包…", "shell.updateBadge.verifying zh-CN");
+eq(t("shell.updateBadge.verifying", "en-US"), "Verifying installer…", "shell.updateBadge.verifying en-US");
+eq(t("shell.updateBadge.launching", "zh-CN"), "已下载，正在启动安装程序…", "shell.updateBadge.launching zh-CN");
+eq(t("shell.updateBadge.launching", "en-US"), "Downloaded — launching installer…", "shell.updateBadge.launching en-US");
+eq(t("update.busy.title", "zh-CN"), "更新任务进行中…（全局仅允许一个更新任务）", "update.busy.title zh-CN");
+eq(t("update.busy.title", "en-US"), "Update in progress… (only one update task runs at a time)", "update.busy.title en-US");
+eq(t("update.failed.title", "zh-CN"), "更新失败，点击重试", "update.failed.title zh-CN");
+eq(t("update.failed.title", "en-US"), "Update failed — click to retry", "update.failed.title en-US");
+// Labels the badge reuses from the settings page must exist too (percent form).
+eq(t("desktop.shellDownloading", "zh-CN", null, { percent: 42 }), "下载中 42%", "desktop.shellDownloading zh-CN interpolates {percent}");
+eq(t("desktop.shellDownloading", "en-US", null, { percent: 42 }), "Downloading 42%", "desktop.shellDownloading en-US interpolates {percent}");
+eq(t("desktop.shellDownloading.undef", "zh-CN"), "下载中…", "desktop.shellDownloading.undef zh-CN");
+eq(t("desktop.shellDownloading.undef", "en-US"), "Downloading…", "desktop.shellDownloading.undef en-US");
+eq(t("desktop.shellChecking", "zh-CN"), "检查中…", "desktop.shellChecking zh-CN");
+eq(t("desktop.shellChecking", "en-US"), "Checking…", "desktop.shellChecking en-US");
+
 // ---- t() fallback chain ---------------------------------------------------
 // 1) unknown key + explicit fallback string  → fallback
 eq(t("never.defined", "en-US", "FALLBACK"), "FALLBACK", "unknown key with explicit fallback");
