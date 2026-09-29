@@ -141,7 +141,9 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 
 ### 5. 托盘 + 常驻通知栏
 
-托盘图标在**开启设置当下**创建（勿只在关闭时建）；macOS 用模板图 `tray-iconTemplate(.png/@2x.png)`；一切退出路径先 `isQuitting = true`；托盘内置「重启核心」（Ctrl+Alt+Shift+R；v1.10.3 起——原 Ctrl+Alt+R 与 DSH 0.1.7 快捷键系统的默认键位规划区 `Ctrl+Alt+X` 冲突，勿改回）与设置页按钮同一链路，`restartDSH()` 忙时静默 no-op 返回 false。细节 → [docs/agents/desktop-ui.md](docs/agents/desktop-ui.md) §5。
+托盘图标在**开启设置当下**创建（勿只在关闭时建）；macOS 用模板图 `tray-iconTemplate(.png/@2x.png)`；一切退出路径先 `isQuitting = true`；托盘内置「重启核心」与设置页按钮同一链路，`restartDSH()` 忙时静默 no-op 返回 false。细节 → [docs/agents/desktop-ui.md](docs/agents/desktop-ui.md) §5。
+
+**快捷键是平台相关的，唯一来源 = `restartCoreAccelerator()`**（app 菜单注册处与托盘展示处都读它，勿各写一份字面量）：**Windows/Linux `Ctrl+Alt+Shift+R`、macOS `⌘⇧R`**。两端都不得退回双修饰键，但理由不同：win/linux 侧 DSH 快捷键系统在本壳里跑的是 **web** runtime（preload 不暴露 `keyboard` 桥，desktop 分支会直接抛异常），右栏 refresh 默认绑 `primary+alt+KeyR` = 正是 Ctrl+Alt+R，而 Ctrl+Shift+R 是 Chromium 硬刷新，三修饰键是唯一空位；mac 侧 `⌘⌥R`（DSH web refresh）与 `⌘R`（我们自己的刷新）已占前两格，**全树不存在 `primary+shift+KeyR` 绑定**，且 `dsh-client-shortcuts/lib/protocol.js` 明确放行 `primary`+`shift` 两修饰键——三修饰键在 MacBook 上纯属手势负担。设置页说明文案分 `core.shortcut.win` / `core.shortcut.mac`（zh/en × 2，`locales.js` + `client.js` 内嵌副本同步）。
 
 ### 6. 阻止休眠 / 任务通知 / 设置持久化
 
