@@ -122,6 +122,19 @@ eq(detectLocale(undefined), DEFAULT_LOCALE, "undefined Accept-Language → defau
 eq(detectLocale("garbage,,;"), DEFAULT_LOCALE, "garbage → default");
 eq(detectLocale("zh-Hans"), "zh-CN", "zh-Hans (Chinese Simplified macro) → zh-CN (Simplified Chinese is the supported Chinese)");
 
+// ---- restart-core shortcut hint (AGENTS §5) --------------------------------
+// Pinned literally, not just "key exists": the mac hint has now been wrong
+// TWICE. v1.10.5 advertised ⌘⇧R, which collides with the shell's own
+// `{ role: "forceReload" }` in buildMenu() — a binding invisible to any scan of
+// the DSH core tree. If this assertion fires, the accelerator in
+// restartCoreAccelerator() changed without the three copies being resynced, or
+// somebody re-litigated the chord without grepping main.js's Menu template.
+// test-shortcut-collisions.js is the other half of this lock.
+eq(t("core.shortcut.mac", "zh-CN"), "快捷键：⌘ R 刷新页面；⌃ ⌥ ⇧ R 重启核心", "core.shortcut.mac zh-CN");
+eq(t("core.shortcut.mac", "en-US"), "Shortcuts: ⌘ R reload · ⌃ ⌥ ⇧ R restart core", "core.shortcut.mac en-US");
+eq(t("core.shortcut.win", "zh-CN"), "快捷键：Ctrl+R 刷新页面；Ctrl+Alt+Shift+R 重启核心", "core.shortcut.win zh-CN");
+eq(t("core.shortcut.win", "en-US"), "Shortcuts: Ctrl+R reload · Ctrl+Alt+Shift+R restart core", "core.shortcut.win en-US");
+
 if (failures) {
   console.error(`\n${failures} assertion(s) failed`);
   process.exit(1);

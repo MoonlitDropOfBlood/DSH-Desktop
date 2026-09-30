@@ -3428,23 +3428,44 @@ function refreshTrayTooltip() {
  * (which registers it) and the tray menu (which only DISPLAYS it) read. Keep
  * it a function, not a constant literal duplicated at the two call sites.
  *
- * Windows / Linux keep the three-modifier `CmdOrCtrl+Alt+Shift+R`, and that
- * chord is load-bearing there: DSH's client shortcut system runs in the **web**
- * runtime inside this shell (our preload exposes no `keyboard` bridge, so
- * `runtime === "desktop"` would throw "Desktop keyboard bridge unavailable" —
- * dsh-client-shortcuts/lib/client.js) and its right-sidebar refresh defaults
- * to `primary+alt+KeyR`, i.e. exactly Ctrl+Alt+R / ⌘⌥R. Ctrl+Shift+R is
- * Chromium's hard reload. The three-modifier chord is the only free slot
- * there (protocol.js admits `modifiers.length >= 3` unconditionally).
+ *   Windows / Linux: `CmdOrCtrl+Alt+Shift+R`
+ *   macOS:           `Control+Alt+Shift+R`  (⌃⌥⇧R)
  *
- * macOS is the deliberate special case: ⌘⌥⇧R is a three-modifier contortion
- * on a MacBook and there is no reason to pay for it. ⌘⇧R is free — a full scan
- * of the core tree found NO `primary+shift+KeyR` binding anywhere (DSH's only
- * R-family defaults are `primary+KeyR` and `primary+alt+KeyR`), and
- * protocol.js explicitly admits two-modifier `primary`+`shift` bindings.
+ * Both are three-modifier chords, which is the structural free slot: no
+ * browser, OS, or DSH claim reaches that far. Everything shorter is taken,
+ * and the shorter candidates are split across TWO worlds that a single scan
+ * will not cover — the core tree and this file's own Menu template:
+ *
+ *   ⌘R    — `{ role: "reload" }`       in OUR OWN buildMenu() (视图 → 重新加载)
+ *   ⌘⇧R   — `{ role: "forceReload" }`  in OUR OWN buildMenu() (视图 → 强制重新加载)
+ *   ⌘⌥R   — DSH's right-sidebar refresh, which runs in the **web** runtime
+ *            inside this shell (our preload exposes no `keyboard` bridge, so
+ *            `runtime === "desktop"` would throw "Desktop keyboard bridge
+ *            unavailable" — dsh-client-shortcuts/lib/client.js); its web
+ *            variant defaults to `primary+alt+KeyR`.
+ *
+ * Why macOS gets Control rather than Command: the awkwardness of ⌘⌥⇧R was never
+ * "three modifiers" — it is that ⌘ and ⇧ BOTH live under the right pinky, so the
+ * chord forces a stacked or two-right-hand grip. ⌃ puts one key under each pinky
+ * (⌃ left, ⇧ right) with ⌥ on the left thumb and R on the left index: same three
+ * modifiers, no stacking. The spelling also matches Windows key-for-key.
+ *
+ * DSH's own rules back this up (dsh-client-shortcuts/lib/protocol.js): L200
+ * returns null for `modifiers.length >= 3` on windows/macos, so no ≥3-modifier
+ * chord is ever reserved; and the two-modifier families that ARE reserved on
+ * macOS — ⌥ without ⌘ (accent dead-keys) and ⌃+⌘ (L221) — are both avoided here.
+ *
+ * v1.10.5 special-cased macOS to `⌘⇧R` on the strength of a scan that covered
+ * only the DSH core's node_modules tree. It missed the first two rows above:
+ * Electron `role` accelerators are registered natively in the app menu and are
+ * invisible to DSH's `protocol.js`, so "no `primary+shift+KeyR` binding exists"
+ * was true of the core and false of the shell — the two collided inside
+ * buildMenu()'s own template. `scripts/test-shortcut-collisions.js` now enforces
+ * that intersection check in CI; when changing this chord, change nothing else
+ * until that script is green.
  */
 function restartCoreAccelerator() {
-  return process.platform === "darwin" ? "Command+Shift+R" : "CmdOrCtrl+Alt+Shift+R";
+  return process.platform === "darwin" ? "Control+Alt+Shift+R" : "CmdOrCtrl+Alt+Shift+R";
 }
 
 function rebuildTrayMenu() {
