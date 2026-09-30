@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.5 亮点</h4><ul><li><strong>「重启核心」快捷键在 macOS 上改为 ⌘⇧R</strong>：原来的 ⌘⌥⇧R 要三个修饰键同时按住，在 MacBook 上纯属别扭姿势。改前把 DSH 侧的键位占用逐条查证过：全树只有一条真正的 R 系快捷键声明（右栏刷新，占用 ⌘R 与 ⌘⌥R 两格），不存在 ⌘⇧R 的任何绑定，DSH 的快捷键协议也明确放行「主键 + Shift」两修饰键组合。Windows 与 Linux 保持 Ctrl+Alt+Shift+R 不变——那两端 Ctrl+Alt+R 是 DSH 的刷新、Ctrl+Shift+R 是浏览器硬刷新，三修饰键是唯一空位。</li></ul>',
+      'rel.fallback': '<h4>v1.10.6 亮点</h4><ul><li><strong>「重启核心」快捷键：Windows/Linux 为 Ctrl+Alt+Shift+R，macOS 为 ⌃⌥⇧R</strong>：更短的组合无一空闲——⌘R 与 ⌘⇧R 分别是应用菜单自带的「重新加载」与「强制重新加载」的角色加速键，⌘⌥R 是 DSH 右栏刷新。mac 侧特意避开 ⌘：⌘ 与 ⇧ 同在右手小指、必须叠键，而 ⌃⌥⇧R 的四个键分处两只手，且修饰键名字与 Windows 端逐字一致。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.5 highlights</h4><ul><li><strong>The restart-core shortcut is now ⌘⇧R on macOS</strong>: the old ⌘⌥⇧R needed three modifiers held at once, an awkward contortion on a MacBook. Every DSH-side binding was verified before the change: the core declares exactly one R-family shortcut (right-sidebar refresh, occupying ⌘R and ⌘⌥R), nothing binds ⌘⇧R, and DSH&rsquo;s shortcut protocol explicitly admits two-modifier primary+Shift combinations. Windows and Linux keep Ctrl+Alt+Shift+R &mdash; there Ctrl+Alt+R is DSH&rsquo;s refresh and Ctrl+Shift+R is the browser hard reload, so the three-modifier chord is the only free slot.</li></ul><p style="font-size:12px">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.10.6 highlights</h4><ul><li><strong>Restart-core shortcut: Ctrl+Alt+Shift+R on Windows/Linux, ⌃⌥⇧R on macOS</strong>: no shorter chord is free &mdash; ⌘R and ⌘⇧R are the default accelerators of the app menu&rsquo;s own Reload and Force Reload items, and ⌘⌥R is DSH&rsquo;s right-sidebar refresh. macOS deliberately avoids ⌘: ⌘ and ⇧ share the right pinky and force a stacked grip, while ⌃⌥⇧R spreads across both hands &mdash; and its modifier names match Windows key-for-key.</li></ul><p style="font-size:12px">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.5';
+  var latestVer = 'v1.10.6';
   var lastRelease = null;
 
   function escHtml(s) {

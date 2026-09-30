@@ -6,6 +6,16 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.6] - 2026-10-01
+
+### 修复
+
+- **「重启核心」快捷键 macOS：⌘⇧R → ⌃⌥⇧R（Windows/Linux 仍为 Ctrl+Alt+Shift+R）**：1.10.5 改的 `⌘⇧R` 与壳自带的「强制重新加载」撞车——`⌘⇧R` 正是 Electron 给 `{ role: "forceReload" }` 的默认加速键，而该 role 就在 `buildMenu()` 的视图菜单里（`main.js`），与新注册的「重新启动 DSH」同处一个应用菜单模板。上次漏掉的原因：结论「全树扫描不存在 `primary+shift+KeyR` 绑定」只扫描了 DSH 核心的 node_modules 树，而 **Electron `role` 加速键是原生命令层注册的，DSH 的 `dsh-client-shortcuts/lib/protocol.js` 完全感知不到**——该结论对核心成立、对壳不成立。新键 ⌃⌥⇧R 同样是三修饰键（`protocol.js` L200 对 windows/macos 的 `modifiers.length >= 3` 直接放行，DSH 与浏览器/系统都够不着），但**解决了 ⌘⌥⇧R 真正难受的根因**：不是"三个修饰键"本身，而是 **⌘ 与 ⇧ 同在右手小指、必须叠键或换手**；⌃⌥⇧R 是 ⌃左小指 / ⌥左拇指 / ⇧右小指 / R左食指，两只手零叠键，且修饰键名字与 Windows 端逐字一致。同时避开 L221 在 mac 上保留的两个族：`⌥` 不带 `⌘`（重音死键命名空间）与 `⌃`+`⌘`。`core.shortcut.mac` 的 zh/en 两条文案（`locales.js` + `client.js` 内嵌副本，共四处）改为 ⌃⌥⇧R，`core.shortcut.win` 两条不动。`restartDSH()` 链路、菜单结构、托盘行为均无变化。
+
+### 内部
+
+- **新增 `scripts/test-shortcut-collisions.js` 并并入 `npm test`**：把这次事故的根因（方法论漏洞）固化成 CI 守卫——解析 `main.js` 取出 `restartCoreAccelerator()` 的两个平台取值，与「所有显式 `accelerator:` 字面量」+「所有在用 Electron `role` 的**默认**加速键」逐平台求交集，并校验 ≥3 修饰键、`protocol.js` L221 保留族、DSH web 双修饰键生成空间。role 可以不写 `accelerator` 仍自带一个默认键，这正是 role 不可见、扫描扫不到的成因。脚本内含一条自证断言，证明它确实能抓到 v1.10.5 那个 `⌘⇧R`，避免守卫本身空转。`scripts/test-locales.js` 另加四条字面量断言，把 win/mac 快捷键提示钉死（该提示已错过两次，不该再靠人眼同步三处副本）。
+
 ## [1.10.5] - 2026-09-30
 
 ### 变更
