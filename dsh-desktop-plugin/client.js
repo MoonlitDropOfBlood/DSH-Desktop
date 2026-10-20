@@ -669,6 +669,20 @@ window.__ModuleLoader__.load({
 			// MODERN renders the small native-style corner group (the drag
 			// strips below are shared by both modes).
 			const placement = usePlacement();
+			// MODERN 模式标记（0.1.5+ 金刚键小组件在场）：核心自己的右上角控件
+			// 需要知道"窗口右上角这 92px 被壳占了"才能避让——CSS 用
+			// [data-dsh-desktop-corner] 把避让规则限定在真正有金刚键的模式，
+			// LEGACY（44px 大按钮条，占满整条 strip）不发布
+			// --dsh-desktop-controls-clear，也不该触发这条规则。
+			// 没有窗口桥（普通浏览器里打开同一个 DSH 实例）时压根不渲染金刚键，
+			// 标记同样必须撤掉——否则核心的按钮会被无谓地推走。
+			const windowControlAvailable = hasBridge("windowControl");
+			React.useEffect(() => {
+				const root = document.documentElement;
+				if (!root) return;
+				if (windowControlAvailable && placement === PLACEMENT.MODERN) root.setAttribute("data-dsh-desktop-corner", "");
+				else root.removeAttribute("data-dsh-desktop-corner");
+			}, [placement, windowControlAvailable]);
 			React.useEffect(() => {
 				const host = controlsRef.current;
 				if (!host) return undefined;
@@ -1498,6 +1512,30 @@ window.__ModuleLoader__.load({
    --dsh-desktop-controls-clear only while the corner group is rendered. */
 [data-dsh-desktop] [data-sidebar-right-toggle] {
   margin-right: var(--dsh-desktop-controls-clear, 0px);
+}
+
+/* 自动化任务（schedule）管理整页：右侧详情面板顶栏右上角的操作按钮组
+   （关联会话 / 更多 / 关闭）落在窗口右上角，与本壳的金刚键（固定浮层，
+   z-index 顶格）**重叠**——按钮被盖住、点击也被浮层吃掉。
+   避让用与右栏 chrome 同一把尺子：把按钮组整体左移
+   --dsh-desktop-controls-clear（金刚键组宽 92 + 窗口内缩 8 + 间隙 8 = 108，
+   JS 实测发布）。
+   推导：按钮组所在行的内容右缘 = 窗口右缘 − 详情面板自身留白 --detail-gutter；
+   给按钮组 margin-right = (clear − gutter) 后，其右缘 = 窗口右缘 − clear
+   = W−108 —— 正好落在金刚键组左缘（W−100）再往左 8px 处，**两端的留白
+   相消**：核心改留白（24→20/16）时结果不变，只是间隙变宽，永不相撞。
+   （正 margin-right 把 flex 项往左推：核心自己的 −8px 是把按钮组往右探出
+   8px 到 W−16，正是我们要让开的那 8px。）
+   选择器只认 schedule 插件的稳定 data 属性 data-detail-tab（核心的哈希类名
+   变了也不受影响），并且只在 main 槽（任务管理整页）生效：
+   ① 右栏抽屉里是同一个详情组件，但那里它在 dock 条之下（y≥38），与金刚键
+      （y=10..38）不重叠，**不该被推**——故限定 [data-slot="main"]；
+   ② 右栏（文件浏览器）打开时中心列右缘不到窗口右缘，本来就不撞，故限定
+      [data-rightbar-collapsed]；
+   ③ LEGACY（≤0.1.4）没有金刚键小组件（--dsh-desktop-controls-clear 不发布），
+      故限定 MODERN 标记 [data-dsh-desktop-corner]。 */
+[data-dsh-desktop][data-dsh-desktop-corner] [data-rightbar-collapsed] [data-slot="main"] *:has(> [data-detail-tab]) + :last-child {
+  margin-right: calc(var(--dsh-desktop-controls-clear, 0px) - var(--detail-gutter, 0px));
 }
 
 /* Green update badge (a DSH outline Button re-tinted green). */

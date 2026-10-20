@@ -134,6 +134,7 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 - macOS 吞点击坑：容器不带 app-region，独立细条承载 drag，按钮显式 no-drag。
 - 控制条经 `ReactDOM.createPortal(..., document.body)` 渲染；**绝不手动 appendChild React 管理的节点**（调和 NotFoundError，按钮全灭）。
 - 0.1.5+ 金刚键 = 原生风格 28px 角落小组件 + **常量** `margin-right:80px`（常量不测量）；右栏打开时 corner 座位必须整条 `display:none`（slot outlet 恒留 `display:contents` 锚点 div，核心 `:empty` 永不命中；**勿用 `:has()` 探测 corner 内容**——Chromium 跨该锚点的 `:has()` 失效重算不可靠，2026-09 实测把收起态展开按钮误藏——现行方案：MutationObserver+2s 轮询把面板 `data-sidebar-right-open` 镜像成 `<html data-dsh-desktop-rightbar-open>` 状态标记，CSS 按标记隐藏，否则头部残留 88px 死区）；**LEGACY(≤0.1.4) 完全保持现状**；模式判定权威信号 = 版本三元组 ≥0.1.5（DOM 标记只做解析前兜底；版本解析成功后 body 级观察者即 disconnect）。
+- **金刚键 vs 自动化任务详情页右上角按钮（2026-10-20 修）**：schedule 的「任务管理」整页注册在核心 `main` 槽，右半详情面板顶栏的操作组（关联会话/更多/关闭）就落在窗口右上角，与固定浮层的金刚键**重叠**（浮层 z-index 顶格→按钮被盖+点击被吃）。避让与右栏 chrome 同一把尺子：操作组 `margin-right: calc(var(--dsh-desktop-controls-clear) - var(--detail-gutter))`——**留白相消**，按钮组右缘恒为 W−108（小组件左缘再往左 8px），核心改留白只是间隙变宽。选择器只认 schedule 的稳定属性 `data-detail-tab`（`:has(> [data-detail-tab]) + :last-child`），并三重限定：`[data-slot="main"]`（右栏抽屉里同一组件在 dock 条之下 y≥38，不重叠**不该被推**）/ `[data-rightbar-collapsed]`（右栏开着本就不撞）/ `[data-dsh-desktop-corner]`（MODERN 标记，LEGACY 不触发）。**勿**改成裸 `margin-right:108px`（随核心留白偏移）。守卫 `scripts/test-corner-avoidance.js`（已并入 `npm test`）。
 - Session log 隐藏规则只限桌面（`data-dsh-desktop` 标记）；原生逃生通道（Ctrl+M/W、mac 编辑菜单角色）必须保留。
 - `sync()` 测量**先读后写 + rAF 合并 + 侧栏失联自愈**（2026-09-16 优化，测量语义未动）。
 
@@ -205,6 +206,7 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 npm install          # 装依赖（首次）
 npm test             # 全部零依赖单测（url-extract / plugin-recovery / core-version /
                      #   shell-asset / settings-json / locales / powerplan /
+                     #   shortcut-collisions / corner-avoidance /
                      #   check-i18n-sync / 宣传页守卫）——CI 的 ci.yml 每次 push/PR 都跑
 npm run icon         # 重新生成图标（改了鲸鱼配色/边距后）
 npm start            # 开发运行（frameless 窗口）
