@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.6 亮点</h4><ul><li><strong>「重启核心」快捷键：Windows/Linux 为 Ctrl+Alt+Shift+R，macOS 为 ⌃⌥⇧R</strong>：更短的组合无一空闲——⌘R 与 ⌘⇧R 分别是应用菜单自带的「重新加载」与「强制重新加载」的角色加速键，⌘⌥R 是 DSH 右栏刷新。mac 侧特意避开 ⌘：⌘ 与 ⇧ 同在右手小指、必须叠键，而 ⌃⌥⇧R 的四个键分处两只手，且修饰键名字与 Windows 端逐字一致。</li></ul>',
+      'rel.fallback': '<h4>v1.10.7 亮点</h4><ul><li><strong>金刚键与「自动化任务」详情页右上角按钮重叠（按钮被盖住、点不到）</strong>：DSH 的「自动化任务」管理插件（@deepseek-ai/dsh-client-ui-schedule）把任务管理整页注册在核心 main…</li><li><strong>新增 scripts/test-corner-avoidance.js 并并入 npm test</strong>：把这次的几何常量钉死——金刚键度量（28px 盒 / 4px 间隙 / 8px 内缩 / 10px 顶距 → 组宽 92px）、clear 的 108px…</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.6 highlights</h4><ul><li><strong>Restart-core shortcut: Ctrl+Alt+Shift+R on Windows/Linux, ⌃⌥⇧R on macOS</strong>: no shorter chord is free &mdash; ⌘R and ⌘⇧R are the default accelerators of the app menu&rsquo;s own Reload and Force Reload items, and ⌘⌥R is DSH&rsquo;s right-sidebar refresh. macOS deliberately avoids ⌘: ⌘ and ⇧ share the right pinky and force a stacked grip, while ⌃⌥⇧R spreads across both hands &mdash; and its modifier names match Windows key-for-key.</li></ul><p style="font-size:12px">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.10.7 highlights</h4><ul><li><strong>金刚键与「自动化任务」详情页右上角按钮重叠（按钮被盖住、点不到）</strong>：DSH 的「自动化任务」管理插件（@deepseek-ai/dsh-client-ui-schedule）把任务管理整页注册在核心 main…</li><li><strong>新增 scripts/test-corner-avoidance.js 并并入 npm test</strong>：把这次的几何常量钉死——金刚键度量（28px 盒 / 4px 间隙 / 8px 内缩 / 10px 顶距 → 组宽 92px）、clear 的 108px…</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.6';
+  var latestVer = 'v1.10.7';
   var lastRelease = null;
 
   function escHtml(s) {

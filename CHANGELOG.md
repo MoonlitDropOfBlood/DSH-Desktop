@@ -6,6 +6,16 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.7] - 2026-10-20
+
+### 修复
+
+- **金刚键与「自动化任务」详情页右上角按钮重叠（按钮被盖住、点不到）**：DSH 的「自动化任务」管理插件（`@deepseek-ai/dsh-client-ui-schedule`）把任务管理整页注册在核心 `main` 槽，**右半边的详情面板就是那个编辑页**（面板里的「运行时间 / 重复 / 日期 / 时间 / 时区」几行即是改时间的地方），它顶栏右上角那排操作按钮（关联会话 / 更多 / 关闭）落在 x∈[W−100, W−16]、y∈[8,36] —— 与桌面壳的金刚键固定浮层（x∈[W−100, W−8]、y∈[10,38]，z-index 顶格）**完全重叠**：按钮被浮层盖住，点击也被浮层吃掉（看上去像两个「更多/关闭」叠在一起）。修法沿用右栏 chrome 那把尺子：把操作组整体左移 `margin-right: calc(var(--dsh-desktop-controls-clear) - var(--detail-gutter))`，`--dsh-desktop-controls-clear` 是壳实测发布的值（金刚键组 92 + 窗口内缩 8 + 间隙 8 = 108px），减掉核心自己的详情留白后**两端相消**，按钮组右缘恒为 W−108（金刚键左缘再往左 8px），核心改留白（24→20→16）只会让间隙变宽、永不相撞。选择器只认插件的**稳定 data 属性** `data-detail-tab`（`:has(> [data-detail-tab]) + :last-child`，核心的哈希类名 `t-XoWW_*` 变了也不受影响），并三重限定作用域：`[data-slot="main"]`（右栏抽屉里是同一个组件，但它排在 38px 高的 dock 条之下，与金刚键本就不重叠，**不该被推**）、`[data-rightbar-collapsed]`（右栏文件浏览器开着时中心列右缘不到窗口右缘，本来就不撞）、新增的 MODERN 模式标记 `[data-dsh-desktop-corner]`（LEGACY 模式不发布 clearance、不触发）。另经实机测量排除两处**原有**避让机制均已生效：右栏抽屉自己的全屏/收起按钮（被 `--dsh-desktop-controls-clear` 推开）、会话头部 corner 座位（常量 80px 让位 / 右栏打开时整条隐藏）——注入桌面壳真实 CSS 后扫描冲突带（W−100…W−8 × 10…38），每种可达状态下该带内只剩金刚键自己。
+
+### 内部
+
+- **新增 `scripts/test-corner-avoidance.js` 并并入 `npm test`**：把这次的几何常量钉死——金刚键度量（28px 盒 / 4px 间隙 / 8px 内缩 / 10px 顶距 → 组宽 92px）、clear 的 108px 推导、避让规则的形状（`clear − gutter`、`:has(> [data-detail-tab]) + :last-child`、三重作用域）与「留白相消后按钮组右缘 ≤ 金刚键左缘 − 8px」的不等式，避免以后改动其中任一常量而静默恢复重叠。AGENTS.md §4 与 [docs/agents/desktop-ui.md](docs/agents/desktop-ui.md) §4 同步补上这条红线与完整推导。
+
 ## [1.10.6] - 2026-10-01
 
 ### 修复
