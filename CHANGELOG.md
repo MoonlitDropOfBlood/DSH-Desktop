@@ -16,6 +16,8 @@
 
 - **新增 `scripts/test-corner-avoidance.js` 并并入 `npm test`**：把这次的几何常量钉死——金刚键度量（28px 盒 / 4px 间隙 / 8px 内缩 / 10px 顶距 → 组宽 92px）、clear 的 108px 推导、避让规则的形状（`clear − gutter`、`:has(> [data-detail-tab]) + :last-child`、三重作用域）与「留白相消后按钮组右缘 ≤ 金刚键左缘 − 8px」的不等式，避免以后改动其中任一常量而静默恢复重叠。AGENTS.md §4 与 [docs/agents/desktop-ui.md](docs/agents/desktop-ui.md) §4 同步补上这条红线与完整推导。
 
+- **同批修掉 v1.10.7 自己的 Linux 发布失败（CI）**：v1.10.7 首次发版时 Linux job 挂在 rpm 目标上（`rpmbuild failed (exit code 1)`），AppImage 与 deb **都已打好**，整个 job 却红 → `release` job 被跳过 → **Release 根本没发出去**（Windows/macOS 也白跑）。根因不在我们的代码：**2026-10-19 GitHub 把 `ubuntu-latest` 换成 26.04 镜像，其 rpm 6.0.1 忽略 electron-builder 内置 fpm 1.9.3 的 `--define buildroot <dir>`**（rpm 4.20+ 改从 `%{_builddir}/<name>-<version>-build/BUILDROOT` 取文件）→ rpm 包里每个文件都是 "File not found" → rpmbuild exit 1。修法两条：① Linux job 固定 `runs-on: ubuntu-24.04`（rpm 4.18.2；v1.10.6 的 `.rpm` 正是在它上面产出的），**勿跟随 `ubuntu-latest`**；② rpm 目标拆成独立 step 且 `continue-on-error: true`——**一种格式绝不能阻断整个发布**，artifact 上传配 `if-no-files-found: ignore`。AGENTS.md §11 与 [docs/agents/install-and-update.md](docs/agents/install-and-update.md) §11 同步补上这条红线。
+
 ## [1.10.6] - 2026-10-01
 
 ### 修复

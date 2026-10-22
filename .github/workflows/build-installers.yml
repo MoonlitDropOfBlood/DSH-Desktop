@@ -57,7 +57,13 @@ jobs:
 
   build-linux:
     name: Linux (AppImage + deb + rpm)
-    runs-on: ubuntu-latest
+    # 固定 ubuntu-24.04，**勿跟随 ubuntu-latest**：2026-10-19 ubuntu-latest 换成 26.04 镜像，
+    # 其 rpm 6.0.1 **忽略 electron-builder 内置 fpm 1.9.3 的 `--define buildroot <dir>`**
+    # （rpm 4.20+ 改从 %{_builddir}/<name>-<version>-build/BUILDROOT 找文件），于是 rpm 包里
+    # 每个文件都是 "File not found" → rpmbuild exit 1 → **整个 job 挂掉 → Release 发不出去**
+    # （v1.10.7 就这么失败的：AppImage 与 deb 都已打好，只差 rpm 这一个格式）。
+    # 24.04（rpm 4.18.2）上 v1.10.6 的 .rpm 正常产出。
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -76,14 +82,23 @@ jobs:
           DSH_DESKTOP_NPM_REGISTRY: "https://registry.npmjs.org"
       - name: Fetch bundled Node
         run: node scripts/fetch-node.js
-      - name: Build AppImage + deb + rpm
-        run: npx electron-builder --linux --publish never
+      - name: Build AppImage + deb
+        run: npx electron-builder --linux AppImage deb --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # rpm 只是 Linux 的第三种格式（AppImage 才是主力产物），**绝不让它阻断 Release**：
+      # v1.10.7 就是因为 rpm 目标挂掉 → 整个 job 红 → Release 根本没发出去（AppImage/deb 白打）。
+      # 这里失败只记日志，Release 照发（缺 .rpm 在 Release 资产列表里一眼可见）。
+      - name: Build rpm (non-fatal)
+        continue-on-error: true
+        run: npx electron-builder --linux rpm --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-installers
           retention-days: 14
+          if-no-files-found: ignore
           path: |
             dist/*.AppImage
             dist/*.deb
