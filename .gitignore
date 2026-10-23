@@ -16,3 +16,6 @@ build/pnpm/
 .inst-test*/
 
 .npm-cache-tmp/
+
+# repro 台产物（截图 / 几何快照，临时生成，勿入库）
+scripts/.repro-*

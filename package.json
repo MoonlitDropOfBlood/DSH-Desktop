@@ -28,7 +28,9 @@
     "dist:win": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --win nsis",
     "dist:mac": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --mac",
     "dist:linux": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --linux",
-    "dist:portable": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --win portable"
+    "dist:portable": "npm run fetch:market && npm run fetch:pnpm && npm run fetch:node && electron-builder --win portable",
+    "repro:corner": "node scripts/repro-corner-hmr.mjs",
+    "repro:plugin-lifecycle": "node scripts/repro-plugin-lifecycle.mjs on"
   },
   "build": {
     "appId": "ai.deepseek.dsh.desktop",

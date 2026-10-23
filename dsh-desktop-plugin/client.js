@@ -679,9 +679,19 @@ window.__ModuleLoader__.load({
 			const windowControlAvailable = hasBridge("windowControl");
 			React.useEffect(() => {
 				const root = document.documentElement;
-				if (!root) return;
+				if (!root) return undefined;
 				if (windowControlAvailable && placement === PLACEMENT.MODERN) root.setAttribute("data-dsh-desktop-corner", "");
 				else root.removeAttribute("data-dsh-desktop-corner");
+				// 标记必须与金刚键组同生共死：它是壳唯一的「右上角被占」信号，
+				// 核心的每一处避让规则都以它为前提。标记泄漏 = 核心自己的按钮
+				// 永远留着 80px/108px 的幽灵空档（金刚键都不在了还在避让），
+				// 而这种状态只有整页刷新（Ctrl+R）才能复位——正是用户报的「错乱」。
+				// React 在依赖变化时先跑 cleanup 再跑 body，两者同在一个提交里，
+				// 不会出现可见的空档。
+				return () => {
+					const el = document.documentElement;
+					if (el) el.removeAttribute("data-dsh-desktop-corner");
+				};
 			}, [placement, windowControlAvailable]);
 			React.useEffect(() => {
 				const host = controlsRef.current;
@@ -739,12 +749,6 @@ window.__ModuleLoader__.load({
 					const headerEl = document.querySelector('[data-slot="conversation.session.header"]');
 					const mainH = topClearance(headerEl, DRAG_STRIP_MAX_MAIN);
 					const sideH = (left > 0 && sidebar) ? topClearance(sidebar) : 0;
-					let clear = 0;
-					const group = host.querySelector(".dsh-desktop-corner-group");
-					if (group) {
-						const r = group.getBoundingClientRect();
-						if (r.width > 0) clear = Math.max(0, vw - r.left) + 8;
-					}
 					// ---- writes ----
 					host.style.left = left + "px";
 					const drag = host.querySelector(".dsh-desktop-drag");
@@ -757,9 +761,16 @@ window.__ModuleLoader__.load({
 						dragSide.style.width = left + "px";
 						dragSide.style.height = sideH + "px";
 					}
-					if (document.documentElement) {
-						document.documentElement.style.setProperty("--dsh-desktop-controls-clear", clear + "px");
-					}
+					// NOTE: --dsh-desktop-controls-clear is NOT published from JS.
+					// It used to be measured here (vw − group.left + 8) and written
+					// to <html>'s inline style — but the plugin's own cleanup
+					// REMOVES that inline property, and a missing value turned the
+					// core-side rule into `calc(0px - var(--detail-gutter))` = a
+					// NEGATIVE margin-right that shoved the core's own buttons
+					// RIGHT into the corner band (the "错乱"), and only a page
+					// reload cleared it. The reserved zone is a CONSTANT of the
+					// corner group's fixed metrics, so it now lives in CSS,
+					// keyed on the same marker that says "the group is here".
 				};
 				const schedule = () => {
 					if (raf) return;
@@ -1465,9 +1476,28 @@ window.__ModuleLoader__.load({
    so the corner must end at ≤ window right − 108px → margin 108 − 28 = 80px.
    (Overrides the wrapper's own margin-right:-16px via higher specificity.)
    Constant, never measured: if DSH ever grows the header's right padding
-   the gap just widens — it can never overlap. */
-[data-dsh-desktop] [data-conversation-header-corner] {
+   the gap just widens — it can never overlap.
+   Scoped by [data-dsh-desktop-corner]: the seat must be pushed ONLY while
+   the 金刚键 group is actually on screen. Unscoped, the seat kept an 80px
+   hole in the header even with no corner group at all (LEGACY cores, a
+   browser without the shell bridge, or a torn-down plugin) — a permanent
+   "错乱" that only a page reload cleared. */
+[data-dsh-desktop][data-dsh-desktop-corner] [data-conversation-header-corner] {
   margin-right: 80px;
+}
+
+/* The reserved top-right zone, as a CONSTANT of the corner group's fixed
+   metrics: 3 × 28px buttons + 2 × 4px gaps = 92px, + 8px window inset,
+   + 8px gap to the core's own controls = 108px.
+   It is published HERE (CSS), keyed on the SAME marker that says "the 金刚键
+   group is on screen", so the zone and the group can never disagree. The
+   previous JS-measured value could go missing (the plugin's cleanup removed
+   it), and a missing value became calc(0px - var(--detail-gutter)) — a
+   NEGATIVE margin that pushed the core's own buttons RIGHT into the corner
+   band. Now: marker present ⇒ 108px; marker absent ⇒ the variable does not
+   exist and every avoidance rule below is inert. */
+[data-dsh-desktop][data-dsh-desktop-corner] {
+  --dsh-desktop-controls-clear: 108px;
 }
 
 /* When the right sidebar is OPEN the corner seat must hide COMPLETELY: the
@@ -1505,11 +1535,11 @@ window.__ModuleLoader__.load({
    data-sidebar-right-mode / collapse data-sidebar-right-toggle, a flex row
    whose margin-left:auto cluster hugs the strip's right edge) sit at the
    window's top-right corner — where the FIXED corner group lives. Pushing
-   the collapse button's right margin out by the measured group width moves
+   the collapse button's right margin out by the reserved zone width moves
    the whole chrome cluster clear of the window buttons. The attribute only
    exists on 0.1.5+ (the sidebar-right package first shipped 0.1.5-alpha.1),
-   so legacy cores are structurally untouched; the JS publishes
-   --dsh-desktop-controls-clear only while the corner group is rendered. */
+   so legacy cores are structurally untouched; the zone width is published by
+   the CSS constant above, which only exists while the corner group does. */
 [data-dsh-desktop] [data-sidebar-right-toggle] {
   margin-right: var(--dsh-desktop-controls-clear, 0px);
 }
@@ -1519,23 +1549,26 @@ window.__ModuleLoader__.load({
    z-index 顶格）**重叠**——按钮被盖住、点击也被浮层吃掉。
    避让用与右栏 chrome 同一把尺子：把按钮组整体左移
    --dsh-desktop-controls-clear（金刚键组宽 92 + 窗口内缩 8 + 间隙 8 = 108，
-   JS 实测发布）。
+   CSS 常量，与「金刚键在场」标记同源）。
    推导：按钮组所在行的内容右缘 = 窗口右缘 − 详情面板自身留白 --detail-gutter；
    给按钮组 margin-right = (clear − gutter) 后，其右缘 = 窗口右缘 − clear
    = W−108 —— 正好落在金刚键组左缘（W−100）再往左 8px 处，**两端的留白
    相消**：核心改留白（24→20/16）时结果不变，只是间隙变宽，永不相撞。
    （正 margin-right 把 flex 项往左推：核心自己的 −8px 是把按钮组往右探出
    8px 到 W−16，正是我们要让开的那 8px。）
+   max(0px, …) 是兜底：万一变量缺失/为 0，宁可"不避让"（按钮组回到核心
+   自己的位置）也**绝不能算出负外边距把按钮组往右推进金刚键带**——那正是
+   用户报的"错乱"，且只有 Ctrl+R 能复位。
    选择器只认 schedule 插件的稳定 data 属性 data-detail-tab（核心的哈希类名
    变了也不受影响），并且只在 main 槽（任务管理整页）生效：
    ① 右栏抽屉里是同一个详情组件，但那里它在 dock 条之下（y≥38），与金刚键
       （y=10..38）不重叠，**不该被推**——故限定 [data-slot="main"]；
    ② 右栏（文件浏览器）打开时中心列右缘不到窗口右缘，本来就不撞，故限定
       [data-rightbar-collapsed]；
-   ③ LEGACY（≤0.1.4）没有金刚键小组件（--dsh-desktop-controls-clear 不发布），
-      故限定 MODERN 标记 [data-dsh-desktop-corner]。 */
+   ③ LEGACY（≤0.1.4）没有金刚键小组件，故限定 MODERN 标记
+      [data-dsh-desktop-corner]（该标记与金刚键组同生共死）。 */
 [data-dsh-desktop][data-dsh-desktop-corner] [data-rightbar-collapsed] [data-slot="main"] *:has(> [data-detail-tab]) + :last-child {
-  margin-right: calc(var(--dsh-desktop-controls-clear, 0px) - var(--detail-gutter, 0px));
+  margin-right: max(0px, calc(var(--dsh-desktop-controls-clear, 0px) - var(--detail-gutter, 0px)));
 }
 
 /* Green update badge (a DSH outline Button re-tinted green). */
@@ -1734,6 +1767,11 @@ window.__ModuleLoader__.load({
 				styleTag.remove();
 				if (document.documentElement) {
 					document.documentElement.removeAttribute("data-dsh-desktop");
+					// The MODERN corner marker belongs to the 金刚键 group: it must
+					// die with it, or the core's own buttons keep a phantom
+					// 80px/108px gap for a widget that is no longer on screen
+					// (the "错乱" that only a page reload cleared).
+					document.documentElement.removeAttribute("data-dsh-desktop-corner");
 					document.documentElement.style.removeProperty("--dsh-desktop-controls-clear");
 				}
 			});
