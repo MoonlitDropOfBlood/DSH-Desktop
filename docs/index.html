@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.7 亮点</h4><ul><li><strong>金刚键与「自动化任务」详情页右上角按钮重叠（按钮被盖住、点不到）</strong>：DSH 的「自动化任务」管理插件（@deepseek-ai/dsh-client-ui-schedule）把任务管理整页注册在核心 main…</li><li><strong>新增 scripts/test-corner-avoidance.js 并并入 npm test</strong>：把这次的几何常量钉死——金刚键度量（28px 盒 / 4px 间隙 / 8px 内缩 / 10px 顶距 → 组宽 92px）、clear 的 108px…</li><li><strong>同批修掉 v1.10.7 自己的 Linux 发布失败（CI）</strong>：v1.10.7 首次发版时 Linux job 挂在 rpm 目标上（rpmbuild failed (exit code 1)），AppImage 与 deb…</li></ul>',
+      'rel.fallback': '<h4>v1.10.8 亮点</h4><ul><li><strong>金刚键导致部分 UI 错乱（息屏恢复 / 插件 client 刷新后发作，Ctrl+R 才恢复）</strong>：金刚键小组件一直画得对，错乱来自它「宣称右上角被占」的方式被拆成了三份互不相干的状态——小组件 DOM、<html> 上的在场标记、以及 JS 实测写进内联 style 的占位宽度。占位宽度一丢（插件 cleanup 会删掉它），核心侧避让公式就退化成负外边距，把核心自己的按钮往右推进金刚键带（实测右栏「收起」按钮与金刚键重叠 26px）；标记一泄漏，核心又为一个已经不在屏幕上的小组件永久让路（头部 80px 空洞）。修法：占位宽度改为与在场标记同源的样式表常量（108px）、标记随小组件一起摘除、避让公式包 max(0px, …) 永不产生负外边距。修复后同一场景重叠 0px。</li><li><strong>新增真机复现台（npm run repro:corner）</strong>：Edge 无头 + CDP + 仿真 preload 桥，让桌面壳的客户端插件在普通浏览器里真渲染出金刚键并直接量出重叠像素；配套 CI 守卫补四条不变量（占位宽度不得由 JS 发布 / 标记必须随组件清理 / 避让规则永不为负 / 80px 规则带标记限定）。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.7 highlights</h4><ul><li><strong>金刚键与「自动化任务」详情页右上角按钮重叠（按钮被盖住、点不到）</strong>：DSH 的「自动化任务」管理插件（@deepseek-ai/dsh-client-ui-schedule）把任务管理整页注册在核心 main…</li><li><strong>新增 scripts/test-corner-avoidance.js 并并入 npm test</strong>：把这次的几何常量钉死——金刚键度量（28px 盒 / 4px 间隙 / 8px 内缩 / 10px 顶距 → 组宽 92px）、clear 的 108px…</li><li><strong>同批修掉 v1.10.7 自己的 Linux 发布失败（CI）</strong>：v1.10.7 首次发版时 Linux job 挂在 rpm 目标上（rpmbuild failed (exit code 1)），AppImage 与 deb…</li></ul><p style=\"font-size:12px\">（离线兜底内容为中文摘要；联网时本页自动展示 GitHub Release 原文。）</p>',
+      'rel.fallback': '<h4>v1.10.8 highlights</h4><ul><li><strong>The corner widget made parts of the UI misalign (after screen wake or a plugin client refresh; Ctrl+R was the only cure)</strong>: the corner group itself was always drawn correctly — the breakage came from how it announced that the top-right corner is taken, split across three unrelated pieces of state: the group DOM, an on-page presence marker, and a reserved-zone width measured in JS and written to an inline style. When that width went missing (the plugin cleanup removes it), the core-side avoidance degraded to a NEGATIVE margin and pushed core-side buttons right into the corner band (measured: the right sidebar collapse button overlapped the corner group by 26px); when the marker leaked, the core kept dodging a widget that was no longer on screen (an 80px hole in the header). Fix: the reserved zone is now a stylesheet constant keyed on the same presence marker (108px), the marker dies with the group, and the avoidance formula can never compute a negative margin. Same scenario after the fix: 0px overlap.</li><li><strong>New on-device repro harness (npm run repro:corner)</strong>: headless Edge + CDP with a simulated preload bridge, so the shell client plugin really renders the corner widget in a plain browser and the overlap can be measured directly; the CI guard gains four more invariants (the zone must not be published from JS, the marker must be cleaned up with the group, avoidance must never go negative, the 80px rule must be scoped by the marker).</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.7';
+  var latestVer = 'v1.10.8';
   var lastRelease = null;
 
   function escHtml(s) {

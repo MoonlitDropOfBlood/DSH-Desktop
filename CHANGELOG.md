@@ -6,6 +6,22 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.8] - 2026-10-24
+
+### 修复
+
+- **金刚键导致部分 UI 错乱（电脑息屏恢复后 / 插件 client 刷新后发作，按 Ctrl+R 刷新才恢复）**：金刚键小组件本身一直画得对（固定 `top:10px; right:8px`，组宽 92px），错乱来自它**宣称「右上角被占」的方式**——这件事被拆成了三份互不相干的状态：① 小组件 DOM（React 渲染）；② `<html data-dsh-desktop-corner>` 在场标记（effect 设置，**从不清理**）；③ `--dsh-desktop-controls-clear` 占位宽度（`sync()` **JS 实测**小组件宽度后写进 `<html>` 的**内联 style**，而插件的 `apply()` cleanup 会 `removeProperty` 掉它）。②③ 因此能互相打架，且坏状态**只有整页刷新（Ctrl+R）才能复位**——正是本次报障的现象。两种坏法各有一种典型症状：
+  - **占位宽度一丢失** → 核心侧避让规则退化成 `calc(var(--dsh-desktop-controls-clear, 0px) - var(--detail-gutter, 0px))` = `calc(0px − 24px)` = **负外边距**，把核心自己的按钮**往右推进**金刚键带。实测量到：右栏打开时，「收起」按钮的 `margin-right` 从 108px 掉到 0px，位置 x=1504→1612，与金刚键组（x∈[1546,1638]）**重叠 26px**——按钮被浮层盖住、点击被吃掉（与 v1.10.7 修的那处重叠同源，但触发条件不同：那次是核心自己的留白算错，这次是壳的占位变量丢了）。
+  - **标记一泄漏** → 核心为一个**已经不在屏幕上**的小组件继续让路：会话头部 corner 座位永久留着 80px 空洞（那条 80px 常量规则原本没带标记限定），详情操作组被无谓地推走 84px。
+  - 修法（把状态收敛到**一个真源**，让坏状态结构上不可能）：占位宽度改为**样式表常量** `[data-dsh-desktop][data-dsh-desktop-corner]{--dsh-desktop-controls-clear:108px}`——它与「金刚键在场」标记**同源**，二者不可能再不一致，也没有 JS 变量会丢；标记**随小组件一起摘除**（`WindowControls` 的 effect cleanup + `apply()` 的 cleanup 各一次，fiber 死在 React 卸载之前也覆盖到）；避让公式再包一层 `max(0px, …)`——万一变量缺失或为 0，**退化成「不避让」**（按钮组回到核心自己的位置）而不是「往右撞进金刚键」；头部 corner 座位的 80px 规则补上 `[data-dsh-desktop-corner]` 限定，没有金刚键时**不留空洞**。
+  - 实测对照（Edge 无头 + CDP 复现台，右栏打开态量几何）：修复前 cleanup 后重叠 **26px**；修复后同一步骤重叠 **0px**、按钮位置不变（x=1504..1532，`margin-right:108px`）。标记撤掉后头部座位外边距从 80px 回到核心自己的 -16px（停止让路）。
+
+### 内部
+
+- **新增 `scripts/repro-corner-hmr.mjs` 真机复现台（`npm run repro:corner`）**：Edge 无头 + CDP，注入一个**仿真 preload 桥**（`window.dshDesktop`，字段与 `preload.js` 对齐）让桌面壳的客户端插件在普通浏览器里真渲染出金刚键，然后量几何 / 截图。场景：`stale`（模拟插件 cleanup 后的半死状态，直接量出与金刚键组的**重叠像素**）、`rebuild`（touch 插件 `client.js` → 核心的 HMR watch stat 到 mtime 变化 → 广播 `rebuilt` 帧 → 浏览器端拆掉重建该 client 模块）、`offline`（CDP 断网再恢复 = 息屏后 SSE 重连）、`openbar`（右栏开关）。配套 `scripts/repro-plugin-lifecycle.mjs`（`npm run repro:plugin-lifecycle`）给 profile 里的插件副本插桩，把 `apply()` 的进入/退出、`WindowControls` 挂载、占位测量值打到 `window.console`——核心的 `ctx.logger` 在渲染进程里**不可见**，只能这样取证。
+
+- **`scripts/test-corner-avoidance.js` 补四条新不变量**（已并入 `npm test`）：① 占位宽度**不得**由 JS `setProperty` 发布（可丢失的值不能进避让公式）；② 标记必须带 cleanup（与小组件同生共死）；③ 避让规则**永不为负**（`max(0px, …)`，变量缺失时退化为 0 而非负外边距）；④ 头部 80px 规则必须带 `[data-dsh-desktop-corner]` 限定。AGENTS.md §4 与 [docs/agents/desktop-ui.md](docs/agents/desktop-ui.md) §4 同步补上这条红线与完整推导。
+
 ## [1.10.7] - 2026-10-20
 
 ### 修复
