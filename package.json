@@ -13,7 +13,7 @@
     "start": "electron .",
     "clean": "node scripts/clean.js",
     "lint": "eslint .",
-    "test": "node scripts/test-url-extract.js && node scripts/test-plugin-recovery.js && node scripts/test-core-version.js && node scripts/test-shell-asset.js && node scripts/test-settings-json.js && node scripts/test-locales.js && node scripts/test-powerplan.js && node scripts/test-shortcut-collisions.js && node scripts/test-corner-avoidance.js && node scripts/check-i18n-sync.js && node scripts/check-docs-page.js",
+    "test": "node scripts/test-url-extract.js && node scripts/test-plugin-recovery.js && node scripts/test-core-version.js && node scripts/test-shell-asset.js && node scripts/test-settings-json.js && node scripts/test-locales.js && node scripts/test-powerplan.js && node scripts/test-shortcut-collisions.js && node scripts/test-corner-avoidance.js && node scripts/test-placement-rightbar.js && node scripts/check-i18n-sync.js && node scripts/check-docs-page.js",
     "test:e2e:recovery": "node scripts/e2e-plugin-recovery.js",
     "test:e2e:float": "node scripts/e2e-float-window.js",
     "test:e2e:i18n-power": "node scripts/e2e-i18n-powerplan.js",

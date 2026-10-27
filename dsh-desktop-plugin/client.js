@@ -599,16 +599,19 @@ window.__ModuleLoader__.load({
 					: (legacyMarker ? false : (corner || rightbar));
 				return modern ? PLACEMENT.MODERN : PLACEMENT.LEGACY;
 			};
-			const notify = () => {
-				// The version signal is authoritative: once it has answered,
-				// compute() no longer consults the DOM at all — further fallback
-				// notifications (3 full-document querySelectors each) are pure
-				// overhead, so short-circuit here.
-				if (versionModern !== null) return;
-				const next = compute();
+			const publish = (next) => {
 				if (next === placement) return;
 				placement = next;
 				for (const fn of Array.from(listeners)) { try { fn(); } catch (e) { /* noop */ } }
+			};
+			const notifyDomChanged = () => {
+				// DOM fallback notifications are pure overhead once the authoritative
+				// version has answered. Keep that early return ON THIS PATH ONLY:
+				// setVersion() must still publish its own result — calling this DOM
+				// notifier after assigning versionModern used to swallow the version
+				// update and freeze the first frame's fallback placement indefinitely.
+				if (versionModern !== null) return;
+				publish(compute());
 			};
 			return {
 				subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -620,11 +623,25 @@ window.__ModuleLoader__.load({
 					const parsed = isModernVersion(v);
 					if (parsed === null || parsed === versionModern) return parsed;
 					versionModern = parsed;
-					notify();
+					// The authoritative signal has its own publisher. Do NOT route it
+					// through notifyDomChanged(), whose version-present early return
+					// would otherwise suppress the update we just received.
+					publish(parsed ? PLACEMENT.MODERN : PLACEMENT.LEGACY);
 					return parsed;
 				},
-				notifyDomChanged: notify
+				notifyDomChanged
 			};
+		}
+		// Rightbar SessionView subtrees stay mounted when another session becomes
+		// active; their hidden panels retain data-sidebar-right-open. Only a VISIBLE
+		// open panel may drive the document-level marker that hides the current
+		// conversation's expand button. This mirrors core's own visibility rule
+		// (closest('[hidden], [aria-hidden="true"]') === null), instead of letting a
+		// background session pin the marker forever.
+		function hasVisibleRightbarOpen(doc) {
+			return Array.from(doc.querySelectorAll("[data-sidebar-right-open]")).some((panel) =>
+				panel.closest('[hidden], [aria-hidden="true"]') === null
+			);
 		}
 		// Created in apply() before any slot registration; lazily re-created on
 		// first render as a belt-and-suspenders for HMR ordering.
@@ -1818,14 +1835,16 @@ window.__ModuleLoader__.load({
 			// defeated by the slot outlet's permanent display:contents anchor,
 			// and :has() invalidation across that anchor proved unreliable —
 			// it hid the collapsed-state expand button, 2026-09 live-tested).
-			// attributeFilter keeps this off the streaming childList path; the
-			// 2s poll covers panel remounts that set the attribute while the
-			// node was still detached (React sets attributes pre-insertion).
+			// Only a VISIBLE open panel counts: retained background sessions keep
+			// their open attribute while hidden. Watch all three visibility inputs
+			// so switching sessions updates immediately; attributeFilter keeps this
+			// off the streaming childList path. The 2s poll only covers remounts
+			// that set attributes before insertion (React sets them pre-insertion).
 			if (isDesktop && typeof MutationObserver !== "undefined" && typeof ctx.effect === "function") {
 				ctx.effect(() => {
 					const root = document.documentElement;
 					const syncRightbarOpen = () => {
-						const open = !!document.querySelector("[data-sidebar-right-open]");
+						const open = hasVisibleRightbarOpen(document);
 						if (open) root.setAttribute("data-dsh-desktop-rightbar-open", "");
 						else root.removeAttribute("data-dsh-desktop-rightbar-open");
 					};
@@ -1833,7 +1852,7 @@ window.__ModuleLoader__.load({
 					const observer = new MutationObserver(syncRightbarOpen);
 					observer.observe(document.body, {
 						attributes: true, subtree: true,
-						attributeFilter: ["data-sidebar-right-open"]
+						attributeFilter: ["data-sidebar-right-open", "hidden", "aria-hidden"]
 					});
 					const poll = setInterval(syncRightbarOpen, 2000);
 					return () => {

@@ -21,7 +21,7 @@ const nodeGlobals = {
   Buffer: "readonly", setTimeout: "readonly", clearTimeout: "readonly",
   setInterval: "readonly", clearInterval: "readonly", setImmediate: "readonly",
   URL: "readonly", AbortController: "readonly", TextEncoder: "readonly",
-  TextDecoder: "readonly", fetch: "readonly", structuredClone: "readonly"
+  TextDecoder: "readonly", fetch: "readonly", WebSocket: "readonly", structuredClone: "readonly"
 };
 
 const browserGlobals = {
@@ -42,7 +42,7 @@ module.exports = [
   },
   {
     files: ["main.js", "plugin-recovery.js", "url-extract.js", "core-version.js",
-      "shell-asset.js", "settings-json.js", "scripts/**/*.js",
+      "shell-asset.js", "settings-json.js", "scripts/**/*.js", "scripts/**/*.mjs",
       "dsh-desktop-plugin/index.js", "plugins/whaleharbor-promo/index.js"],
     languageOptions: { globals: nodeGlobals }
   },
