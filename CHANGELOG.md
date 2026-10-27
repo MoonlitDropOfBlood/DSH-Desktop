@@ -6,6 +6,21 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.9] - 2026-10-27
+
+### 修复
+
+- **v1.10.8 修复后仍残余的两条错误状态源（切换会话后当前会话的右侧栏展开按钮消失 / 插件 client 重建后窗口控件模式冻结在首帧）**。真实现场取证（保留现场、未刷新，Electron 临时 inspector + 全 DPI 原生捕获）确认 1.10.8 的 108px 常量与标记同源方案本身几何正常（右栏收起按钮右缘 1398、金刚键左缘 1412，间隙 14px），错乱来自另外两条独立缺陷：
+  - **① 版本信号通知死路**：`placementStore.setVersion()` 先写 `versionModern` 再调 DOM 兜底通知，而该通知一见版本已到位就早退——权威版本到达后**从不通知订阅者**。首帧若按 DOM 兜底判定（如干净首帧 = LEGACY），之后即使桥报来 0.1.5+ 版本，placement 也永久冻结，控件模式与避让规则全部错误。修法：拆出独立 `publish()`；`setVersion()` 直接发布版本结果（MODERN→LEGACY 方向同样生效），DOM 兜底通知保留原早退（省掉版本落定后的无效全文档扫描）。
+  - **② 右栏状态标记被隐藏会话钉死**：`<html data-dsh-desktop-rightbar-open>` 原由文档级 `querySelector("[data-sidebar-right-open]")` 推导，而核心会**保留其他会话的右栏子树**（`hidden` 但仍带 open 属性）——现场实测文档中同时存在两个 open 面板、其一属于隐藏会话。切到右栏收起的会话后，隐藏面板让标记恒为真，当前会话的头部展开按钮被 `display:none` 持续隐藏（2 秒轮询只是反复算出同一个错误结果）。修法：只统计**可见**的 open 面板（`closest('[hidden], [aria-hidden="true"]') === null`，与核心 `visibleSidebarPane` 同口径）；观察器同时监听 `data-sidebar-right-open` / `hidden` / `aria-hidden`，会话切换立即生效，2s 轮询仅兜底插入前赋值。
+  - 两条修复均不触碰 1.10.8 的 108px CSS 常量、80px 头部避让与标记清理逻辑。
+
+### 内部
+
+- **新增 `scripts/test-placement-rightbar.js` 行为守卫（已并入 `npm test`）**：从 `client.js` 逐字抽取生产函数（`PLACEMENT` / `isModernVersion` / `createPlacementStore` / `hasVisibleRightbarOpen`）配微型 DOM double 真执行——实现缺失或仍是旧语义都会明确 FAIL，不是拿副本测副本。54 条断言覆盖：版本到达必须切换且恰好通知一次、重复/无效版本不重复通知也不撤销已生效值、DOM 兜底不污染权威值（双向）、可见性语义（仅隐藏 / 仅 aria-hidden / 混合 / 隐藏祖先 / `aria-hidden="false"` / closest 抛错上抛）、观察器过滤器三属性齐全。变异验证：把三组旧实现改回去分别 15 / 2 / 6 条断言翻红，门禁非绿摆设。
+- **隔离真机动态几何验证**：临时 DSH_HOME + 独立端口起真实核心（0.2.1-rc.3），加载本仓库插件产物，无头 Edge + CDP 驱动完整动态链——隐藏 open 面板不置标记（座位保持 28×28 / margin-right 80px）、取消隐藏立即置标记并 `display:none`（矩形归零）、再次隐藏后座位与 80px 几何恢复、金刚键组全程唯一。
+- **`eslint.config.js` 补齐 Node `.mjs` 脚本的全局声明**：`scripts/**/*.mjs` 此前落在 node globals 之外（`WebSocket` 也缺失），全量 `npm run lint` 恢复零报错。
+
 ## [1.10.8] - 2026-10-24
 
 ### 修复

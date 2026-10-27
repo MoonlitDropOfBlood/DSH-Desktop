@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.8 亮点</h4><ul><li><strong>金刚键导致部分 UI 错乱（息屏恢复 / 插件 client 刷新后发作，Ctrl+R 才恢复）</strong>：金刚键小组件一直画得对，错乱来自它「宣称右上角被占」的方式被拆成了三份互不相干的状态——小组件 DOM、<html> 上的在场标记、以及 JS 实测写进内联 style 的占位宽度。占位宽度一丢（插件 cleanup 会删掉它），核心侧避让公式就退化成负外边距，把核心自己的按钮往右推进金刚键带（实测右栏「收起」按钮与金刚键重叠 26px）；标记一泄漏，核心又为一个已经不在屏幕上的小组件永久让路（头部 80px 空洞）。修法：占位宽度改为与在场标记同源的样式表常量（108px）、标记随小组件一起摘除、避让公式包 max(0px, …) 永不产生负外边距。修复后同一场景重叠 0px。</li><li><strong>新增真机复现台（npm run repro:corner）</strong>：Edge 无头 + CDP + 仿真 preload 桥，让桌面壳的客户端插件在普通浏览器里真渲染出金刚键并直接量出重叠像素；配套 CI 守卫补四条不变量（占位宽度不得由 JS 发布 / 标记必须随组件清理 / 避让规则永不为负 / 80px 规则带标记限定）。</li></ul>',
+      'rel.fallback': '<h4>v1.10.9 亮点</h4><ul><li><strong>切换会话后右侧栏展开按钮消失、插件 client 重建后窗口控件模式冻结（v1.10.8 修漏的两条残余错误状态源）</strong>：真实现场取证确认上一版的 108px 避让常量本身几何正常，错乱另有根因。其一，核心版本信号从不通知订阅者——setVersion 先落版本标记再调用一条「版本已到位即早退」的 DOM 兜底通知，首帧按 DOM 兜底判定的控件模式被永久冻结。其二，右栏状态标记由文档级「有没有任意 open 面板」推导，而核心会保留其他会话的隐藏右栏子树（仍带 open 属性）——切到右栏收起的会话后，隐藏面板把标记恒置为真，当前会话的展开按钮被持续 display:none。修法：版本结果改为直接 publish（两个方向都能切换）；右栏标记只认可见面板（与核心自己的可见性口径一致），观察器同时监听 open/hidden/aria-hidden，会话切换立即生效。</li><li><strong>54 条行为守卫 + 隔离真机动态验证</strong>：新测试直接从插件源码抽取生产函数执行（非副本，旧实现回归立即翻红，三组变异分别 15/2/6 条失败）；另在隔离核心 + 无头 Edge 里驱动完整动态链——隐藏面板不置标记、取消隐藏立即隐藏座位、再次隐藏后 28px/80px 几何恢复。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.8 highlights</h4><ul><li><strong>The corner widget made parts of the UI misalign (after screen wake or a plugin client refresh; Ctrl+R was the only cure)</strong>: the corner group itself was always drawn correctly — the breakage came from how it announced that the top-right corner is taken, split across three unrelated pieces of state: the group DOM, an on-page presence marker, and a reserved-zone width measured in JS and written to an inline style. When that width went missing (the plugin cleanup removes it), the core-side avoidance degraded to a NEGATIVE margin and pushed core-side buttons right into the corner band (measured: the right sidebar collapse button overlapped the corner group by 26px); when the marker leaked, the core kept dodging a widget that was no longer on screen (an 80px hole in the header). Fix: the reserved zone is now a stylesheet constant keyed on the same presence marker (108px), the marker dies with the group, and the avoidance formula can never compute a negative margin. Same scenario after the fix: 0px overlap.</li><li><strong>New on-device repro harness (npm run repro:corner)</strong>: headless Edge + CDP with a simulated preload bridge, so the shell client plugin really renders the corner widget in a plain browser and the overlap can be measured directly; the CI guard gains four more invariants (the zone must not be published from JS, the marker must be cleaned up with the group, avoidance must never go negative, the 80px rule must be scoped by the marker).</li></ul>',
+      'rel.fallback': '<h4>v1.10.9 highlights</h4><ul><li><strong>The right sidebar expand button vanished after switching sessions, and the window-control mode froze after a plugin client rebuild (two leftover broken state sources missed by v1.10.8)</strong>: live-scene forensics confirmed the previous 108px avoidance constant itself was geometrically fine — the misbehavior had separate roots. First, the core version signal never notified subscribers: setVersion stored the version flag and then called a DOM fallback notifier that returns early the moment a version is present, freezing whatever the first frame\'s DOM fallback had decided. Second, the rightbar state marker was derived from "any open panel in the document" — but the core keeps other sessions\' hidden rightbar subtrees mounted (still carrying the open attribute). After switching to a session with the rightbar collapsed, a hidden panel kept the marker stuck on, so the current session\'s expand button stayed display:none. Fix: the version result is now published directly (switching works in both directions), and the marker only counts VISIBLE open panels (matching core\'s own visibility rule) while the observer watches open/hidden/aria-hidden so session switches take effect immediately.</li><li><strong>54 behavioral assertions plus an isolated live-machine check</strong>: the new test extracts the production functions straight from the plugin source and executes them (not a copy — reverting to any old implementation turns it red, with three mutation batches failing 15/2/6 assertions); a separate isolated-core headless-Edge run drives the full dynamic chain — a hidden panel never sets the marker, unhiding immediately hides the seat, and re-hiding restores the 28px/80px geometry.</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.8';
+  var latestVer = 'v1.10.9';
   var lastRelease = null;
 
   function escHtml(s) {
