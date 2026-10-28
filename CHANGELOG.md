@@ -6,6 +6,14 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.10] - 2026-10-29
+
+### 变更
+
+- **内置 Node 运行时升级 v24.19.0 → v24.22.1（当前官方最新 LTS）**：`scripts/fetch-node.js`
+  默认版本更新，AGENTS.md / docs/agents/install-and-update.md §1b 文档同步。fetch-node 的
+  `.version` 标记校验保证旧缓存（24.19.0）会被自动清掉重下，不会混进新安装包。
+
 ## [1.10.9] - 2026-10-27
 
 ### 修复
