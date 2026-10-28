@@ -22,7 +22,7 @@
  *   node scripts/fetch-node.js
  *
  * Env:
- *   DSH_DESKTOP_NODE_VERSION — node version to fetch (default: 24.19.0, a Node
+ *   DSH_DESKTOP_NODE_VERSION — node version to fetch (default: 24.22.1, a Node
  *                              24 LTS ≥ the DSH core's 22.15 floor)
  *   DSH_DESKTOP_NODE_MIRROR  — binary mirror (default: npmmirror, 国内快;
  *                              falls back to https://nodejs.org/dist)
@@ -38,7 +38,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const VERSION = process.env.DSH_DESKTOP_NODE_VERSION || "24.19.0";
+const VERSION = process.env.DSH_DESKTOP_NODE_VERSION || "24.22.1";
 const MIRROR = process.env.DSH_DESKTOP_NODE_MIRROR || "https://npmmirror.com/mirrors/node";
 const FALLBACK_MIRROR = "https://nodejs.org/dist";
 // Arch override for cross builds (e.g. building a darwin-x64 dmg on an Apple

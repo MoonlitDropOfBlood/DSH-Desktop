@@ -279,7 +279,7 @@ npm run pack             # 打包目录
 | `DSH_DESKTOP_SHELL_REPO` | 壳自更新的 GitHub 仓库（默认 `MoonlitDropOfBlood/DSH-Desktop`） |
 | `DSH_DESKTOP_SHELL_MIRRORS` | 壳自更新镜像前缀（逗号分隔，空串禁用；默认 gh-proxy.com） |
 | `DSH_DESKTOP_NODE` | 用真实的 Node 二进制覆盖 DSH 运行时（优先于内置 node 与 Electron 内嵌；调试用） |
-| `DSH_DESKTOP_NODE_VERSION` | `fetch:node` 下载的内置 Node 版本（默认 24.19.0） |
+| `DSH_DESKTOP_NODE_VERSION` | `fetch:node` 下载的内置 Node 版本（默认 24.22.1） |
 | `DSH_DESKTOP_NODE_MIRROR` | 内置 Node 二进制镜像（默认 npmmirror，回退 nodejs.org） |
 | `DSH_DESKTOP_NPM` | 覆盖 npm 回退路径要 spawn 的 npm 可执行文件绝对路径 |
 | `DSH_DESKTOP_MARKET_VERSION` | `fetch:market` 下载的 dshmarket 版本（默认 1.15.0） |
