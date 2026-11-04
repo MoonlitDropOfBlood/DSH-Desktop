@@ -709,7 +709,7 @@
       'rel.title': '最新版本',
       'rel.all': '查看全部版本',
       'rel.published': '发布于 ',
-      'rel.fallback': '<h4>v1.10.10 亮点</h4><ul><li><strong>内置 Node 运行时升级 v24.19.0 → v24.22.1（当前官方最新 LTS）</strong>：随安装包分发的独立 Node 是 Windows 无弹窗控制台方案的根基，本次跟进上游 LTS 的安全与稳定性修复；开发态与安装包使用同一版本，fetch-node 的 `.version` 标记校验保证旧版本缓存不会混入新安装包。</li></ul>',
+      'rel.fallback': '<h4>v1.10.11 亮点</h4><ul><li><strong>适配 DSH 0.2.2-rc.1 设置菜单</strong>：「核心 / 桌面版」改用核心新增的 settings.section.icon 原生图标槽，去掉因菜单 DOM 变化而重复显示的设置齿轮；旧版 DSH 继续保留原有图标回退。</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': '工作原理',
       'how.sub': '启动一次，你拥有的是一套会自动保持最新的完整 DSH。',
@@ -802,7 +802,7 @@
       'rel.title': 'Latest release',
       'rel.all': 'All releases',
       'rel.published': 'Released ',
-      'rel.fallback': '<h4>v1.10.10 highlights</h4><ul><li><strong>Bundled Node runtime upgraded from v24.19.0 to v24.22.1 (current official LTS)</strong>: the standalone Node shipped with the installer is the foundation of the popup-free console experience on Windows, and this release picks up the upstream LTS security and stability fixes. Dev runs and packaged installers now share the same version, and the fetch-node `.version` marker check keeps stale cached binaries out of new installers.</li></ul>',
+      'rel.fallback': '<h4>v1.10.11 highlights</h4><ul><li><strong>Adapted to the DSH 0.2.2-rc.1 settings menu</strong>: the Core and Desktop sections now use the native settings.section.icon slot added by DSH, removing the duplicate settings gear exposed by the navigation DOM change; older DSH versions keep the existing icon fallback.</li></ul>',
       'how.eyebrow': 'HOW IT WORKS',
       'how.title': 'How it works',
       'how.sub': 'Launch once, and you get a complete DSH that keeps itself up to date.',
@@ -848,7 +848,7 @@
 
   /* ---- 最新版本（GitHub Releases API，失败时保留静态兜底） ---- */
   var REPO = 'MoonlitDropOfBlood/DSH-Desktop';
-  var latestVer = 'v1.10.10';
+  var latestVer = 'v1.10.11';
   var lastRelease = null;
 
   function escHtml(s) {

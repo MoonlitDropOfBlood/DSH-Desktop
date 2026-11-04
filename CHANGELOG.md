@@ -6,6 +6,12 @@
 > 发布流程：改动记录在 `## [Unreleased]`；打 `v*` 标签发布时，把对应内容移到新的 `## [x.y.z] - <日期>` 小节。
 > GitHub Actions 发布 Release 时会自动取 `## [<版本号>]` 这一节作为 Release 说明。
 
+## [1.10.11] - 2026-11-04
+
+### 修复
+
+- **适配 DSH 0.2.2-rc.1 设置导航图标，去掉「核心 / 桌面版」菜单行上重复的核心齿轮**：新版核心把导航图标包进 `span.navIcon`，旧的 `button > svg:first-child` 隐藏规则不再命中；同时核心正式提供 `settings.section.icon` 扩展槽。桌面插件改为按 `dsh-desktop-core` / `dsh-desktop-shell` 注册原生 React 图标，直接替换核心回退齿轮，并沿用核心下发的 16px 尺寸与 `currentColor` 颜色。旧核心继续使用 MutationObserver + CSS mask 回退；新槽接管前先停用并清理回退观察器，避免两套图标实现叠加。新增 `scripts/test-settings-nav-icons.js` 并并入 `npm test`，锁定 id 配对、尺寸/颜色、旧核心回退与新槽交接顺序。
+
 ## [1.10.10] - 2026-10-29
 
 ### 变更
