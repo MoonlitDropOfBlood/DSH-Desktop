@@ -1009,9 +1009,10 @@ window.__ModuleLoader__.load({
 		// ---- 3. settings sections ----------------------------------------------
 		// Custom SVG icons (independent of DSH's hard-coded nav icons). Each
 		// settings page shows its own icon + title in the content header.
-		function IconCore() {
+		function IconCore(props) {
+			const size = props && typeof props.size === "number" ? props.size : 22;
 			return React.createElement("svg", {
-				width: 22, height: 22, viewBox: "0 0 24 24", fill: "none",
+				width: size, height: size, viewBox: "0 0 24 24", fill: "none",
 				stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round",
 				"aria-hidden": true
 			},
@@ -1021,9 +1022,10 @@ window.__ModuleLoader__.load({
 			);
 		}
 
-		function IconDesktop() {
+		function IconDesktop(props) {
+			const size = props && typeof props.size === "number" ? props.size : 22;
 			return React.createElement("svg", {
-				width: 22, height: 22, viewBox: "0 0 24 24", fill: "none",
+				width: size, height: size, viewBox: "0 0 24 24", fill: "none",
 				stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round",
 				"aria-hidden": true
 			},
@@ -1657,13 +1659,13 @@ window.__ModuleLoader__.load({
 }
 .dsh-desktop-select:focus { outline: none; border-color: var(--dsw-alias-label-secondary, #94a3b8); }
 
-/* Settings nav icons: DSH 0.1.x settings.section only projects
-   id/order/label, and the settings shell paints a generic gear for every
-   external section (client-ui-settings-general's navIcon()).
-   registerSettingsNavIcons marks our own nav rows; hide the shell's gear
-   and draw the cpu (核心) / monitor (桌面版) Lucide glyphs as currentColor
-   masks so they follow the native nav hover/active colors without changing
-   the shell's 16px icon rhythm. */
+/* LEGACY settings nav icons (cores before 0.2.2-rc.1 only): those versions
+   project only id/order/label and paint a generic gear for external sections.
+   registerSettingsNavIcons marks our rows and these masks replace that gear.
+   Newer cores use settings.section.icon instead; its injection disposes the
+   legacy observer before registering the real React icons. In particular, do
+   not "fix" these selectors for the new span.navIcon wrapper: doing so would
+   keep two independent icon implementations alive on the same new-core row. */
 [data-dsh-desktop-core-settings-nav]>svg:first-child{display:none}
 [data-dsh-desktop-core-settings-nav]::before{content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='2'/%3E%3Crect x='9' y='9' width='6' height='6'/%3E%3Cpath d='M15 2v2'/%3E%3Cpath d='M15 20v2'/%3E%3Cpath d='M2 15h2'/%3E%3Cpath d='M2 9h2'/%3E%3Cpath d='M20 15h2'/%3E%3Cpath d='M20 9h2'/%3E%3Cpath d='M9 2v2'/%3E%3Cpath d='M9 20v2'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='2'/%3E%3Crect x='9' y='9' width='6' height='6'/%3E%3Cpath d='M15 2v2'/%3E%3Cpath d='M15 20v2'/%3E%3Cpath d='M2 15h2'/%3E%3Cpath d='M2 9h2'/%3E%3Cpath d='M20 15h2'/%3E%3Cpath d='M20 9h2'/%3E%3Cpath d='M9 2v2'/%3E%3Cpath d='M9 20v2'/%3E%3C/svg%3E") center/contain no-repeat}
 [data-dsh-desktop-shell-settings-nav]>svg:first-child{display:none}
@@ -1695,14 +1697,12 @@ window.__ModuleLoader__.load({
 			} catch (e) { /* noop */ }
 			return DEFAULT_LOCALE;
 		}
-		/* Settings nav icons: DSH 0.1.x does not yet carry an icon through the
-		   settings.section registration contract — the shell projects only
-		   id/order/label and paints a generic gear for every external section.
+		/* Legacy settings nav icons for cores without settings.section.icon.
 		   Mark only this plugin's nav rows (核心 / 桌面版) so the CSS above can
-		   replace the fallback gears; the disposer clears the markers for
-		   plugin disable / HMR reload. Entries are template-shaped: the
-		   resolved label is computed against the CURRENT locale each sync,
-		   so the row marker follows the language the user actually sees. */
+		   replace their fallback gears; the disposer clears the markers for
+		   plugin disable / HMR reload AND before the native icon slot takes over.
+		   Entries are template-shaped: the resolved label is computed against
+		   the CURRENT locale each sync, so the marker follows the visible label. */
 		const SETTINGS_NAV_TEMPLATE = [
 			{ labelKey: SETTINGS_CORE_LABEL_KEY, marker: "data-dsh-desktop-core-settings-nav" },
 			{ labelKey: SETTINGS_SHELL_LABEL_KEY, marker: "data-dsh-desktop-shell-settings-nav" }
@@ -1792,9 +1792,18 @@ window.__ModuleLoader__.load({
 					document.documentElement.style.removeProperty("--dsh-desktop-controls-clear");
 				}
 			});
-			// Mark our settings-nav rows (核心 / 桌面版) so the CSS above
-			// replaces the shell's fallback gear for both sections.
-			if (typeof ctx.effect === "function") ctx.effect(() => registerSettingsNavIcons(SETTINGS_NAV_TEMPLATE));
+			// Pre-0.2.2 cores have no settings.section.icon: keep the old DOM
+			// fallback only until that native slot declares itself. The hand-off
+			// below disposes this observer and its markers before adding the real
+			// icons, so a new-core row can never show both our icon and DSH's gear.
+			let stopLegacySettingsNavIcons = null;
+			if (typeof ctx.effect === "function") ctx.effect(() => {
+				stopLegacySettingsNavIcons = registerSettingsNavIcons(SETTINGS_NAV_TEMPLATE);
+				return () => {
+					if (stopLegacySettingsNavIcons) stopLegacySettingsNavIcons();
+					stopLegacySettingsNavIcons = null;
+				};
+			});
 
 			// Window-button mode store: created BEFORE any slot registration so
 			// WindowControls can subscribe on first render. Signals: the shell
@@ -1867,7 +1876,7 @@ window.__ModuleLoader__.load({
 					.then((s) => {
 						if (!(s && typeof s.installed === "string")) return;
 						if (placementStore.setVersion(s.installed) !== null) detachDomFallback();
-						// Mirror the locale on <html lang> so the settings-nav
+						// Mirror the locale on <html lang> so the legacy settings-nav
 						// matcher (registerSettingsNavIcons above) and any
 						// other consumer that reads documentElement.lang see
 						// the same value the main process sent.
@@ -1919,6 +1928,24 @@ window.__ModuleLoader__.load({
 				{ name: "sidebar.footer.action", id: "dsh-desktop-update", order: 1000, label: tClient("core.check", resolveInitialLocale()) },
 				UpdateBadge
 			));
+			// DSH 0.2.2-rc.1 added per-section navigation icons. The id is the
+			// address: it must exactly match the settings.section id below. Native
+			// registration replaces navIcon()'s fallback gear inside span.navIcon;
+			// no DOM scan or CSS masking is involved on these cores.
+			ctx.slots.inject("settings.section.icon", () => {
+				if (stopLegacySettingsNavIcons) stopLegacySettingsNavIcons();
+				stopLegacySettingsNavIcons = null;
+				return [
+					ctx.slots.register(
+						{ name: "settings.section.icon", id: "dsh-desktop-core", label: tClient(SETTINGS_CORE_LABEL_KEY, resolveInitialLocale()) },
+						IconCore
+					),
+					ctx.slots.register(
+						{ name: "settings.section.icon", id: "dsh-desktop-shell", label: tClient(SETTINGS_SHELL_LABEL_KEY, resolveInitialLocale()) },
+						IconDesktop
+					)
+				];
+			});
 			ctx.slots.inject("settings.section", () => ctx.slots.register(
 				{ name: "settings.section", id: "dsh-desktop-core", order: 100, label: tClient(SETTINGS_CORE_LABEL_KEY, resolveInitialLocale()) },
 				CoreSection

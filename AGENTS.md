@@ -83,7 +83,7 @@ PE 子系统分析、fetch-node 细节 → [docs/agents/install-and-update.md](d
 
 - patch 新增行用 **`- insert:`（值必须是列表）**，普通 `- id:` 是覆盖；写成单映射核心 exit 1。`--patch` 必须放 `--profile` **之前**。
 - client bundle 必须经 `window.__ModuleLoader__.load({id, factory})` 注册；`package.json` 的 `exports` 必须含 `"./package.json"`；访问 `ctx.slots` 必须 `exports.inject = ["slots"]`。
-- 设置导航图标：MutationObserver 打标 + CSS mask 替换齿轮；sync 必须**早退 + 跳过冗余写**（否则流式输出期间每秒几十次全文档扫描）。
+- 设置导航图标：核心 ≥0.2.2-rc.1 必须用 `settings.section.icon`，注册 id 与目标 `settings.section` 完全一致（核心在该槽声明后把图标包进 `span.navIcon`；旧 `button>svg:first-child` 已匹配不到，会残留双图标）。旧核心的 MutationObserver + CSS mask 只作回退，新槽回调注册图标前必须 dispose 观察器并清 marker；绝不让两套方案同时作用于新核心。回退 sync 仍需**早退 + 跳过冗余写**。守卫 `scripts/test-settings-nav-icons.js`。
 
 挂载机制、bundle 正确格式 → [docs/agents/plugins-and-market.md](docs/agents/plugins-and-market.md) §2。
 
@@ -209,7 +209,7 @@ npm install          # 装依赖（首次）
 npm test             # 全部零依赖单测（url-extract / plugin-recovery / core-version /
                      #   shell-asset / settings-json / locales / powerplan /
                      #   shortcut-collisions / corner-avoidance / placement-rightbar /
-                     #   check-i18n-sync / 宣传页守卫）——CI 的 ci.yml 每次 push/PR 都跑
+                     #   settings-nav-icons / check-i18n-sync / 宣传页守卫）——CI 的 ci.yml 每次 push/PR 都跑
 npm run icon         # 重新生成图标（改了鲸鱼配色/边距后）
 npm start            # 开发运行（frameless 窗口）
 npm run fetch:market # 下载内置插件市场到 build/market-plugin/（dist:* 会自动跑）
